@@ -1,0 +1,106 @@
+diff --git a/db/queries.go b/db/queries.go
+index 4bce680..e9131c7 100644
+--- a/db/queries.go
++++ b/db/queries.go
+@@ -289,12 +289,12 @@ func GetListStats(listID int64) Stats {
+ 	DB.QueryRow(`
+ 		SELECT COUNT(*) FROM items i
+ 		JOIN sections s ON i.section_id = s.id
+-		WHERE s.list_id = ?
++		WHERE s.list_id = ? AND i.completed = FALSE
+ 	`, listID).Scan(&stats.TotalItems)
+ 	DB.QueryRow(`
+ 		SELECT COUNT(*) FROM items i
+ 		JOIN sections s ON i.section_id = s.id
+-		WHERE s.list_id = ? AND i.completed = TRUE
++		WHERE s.list_id = ? AND i.completed = TRUE AND i.updated_at >= strftime("%s", strftime("%F", 'now'))
+ 	`, listID).Scan(&stats.CompletedItems)
+ 	if stats.TotalItems > 0 {
+ 		stats.Percentage = (stats.CompletedItems * 100) / stats.TotalItems
+@@ -556,38 +556,72 @@ func GetItemsBySection(sectionID int64) ([]Item, error) {
+ 		sortMode = "manual"
+ 	}
+ 
+-	var query string
++	var itemsQuery string
++	var completedItemsQuery string
+ 	switch sortMode {
+ 	case "alphabetical":
+-		query = `
++		itemsQuery = `
+ 		SELECT id, section_id, name, description, completed, uncertain, COALESCE(quantity, 0), sort_order, created_at, COALESCE(updated_at, 0)
+ 		FROM items
+-		WHERE section_id = ?
+-		ORDER BY completed ASC, name COLLATE NOCASE ASC`
++		WHERE completed = FALSE AND section_id = ?
++		ORDER BY name COLLATE NOCASE ASC`
++
++		completedItemsQuery = `
++		SELECT id, section_id, name, description, completed, uncertain, COALESCE(quantity, 0), sort_order, created_at, COALESCE(updated_at, 0)
++		FROM items
++		WHERE completed = TRUE AND updated_at >= strftime("%s", strftime("%F", 'now')) AND section_id = ?
++		ORDER BY name COLLATE NOCASE ASC`
+ 	case "alphabetical_desc":
+-		query = `
++		itemsQuery = `
++		SELECT id, section_id, name, description, completed, uncertain, COALESCE(quantity, 0), sort_order, created_at, COALESCE(updated_at, 0)
++		FROM items
++		WHERE completed = FALSE AND section_id = ?
++		ORDER BY name COLLATE NOCASE DESC`
++
++		completedItemsQuery = `
+ 		SELECT id, section_id, name, description, completed, uncertain, COALESCE(quantity, 0), sort_order, created_at, COALESCE(updated_at, 0)
+ 		FROM items
+-		WHERE section_id = ?
+-		ORDER BY completed ASC, name COLLATE NOCASE DESC`
++		WHERE completed = TRUE AND updated_at >= strftime("%s", strftime("%F", 'now')) AND section_id = ?
++		ORDER BY name COLLATE NOCASE DESC`
+ 	default:
+-		query = `
++		itemsQuery = `
+ 		SELECT id, section_id, name, description, completed, uncertain, COALESCE(quantity, 0), sort_order, created_at, COALESCE(updated_at, 0)
+ 		FROM items
+-		WHERE section_id = ?
+-		ORDER BY completed ASC, sort_order ASC`
++		WHERE completed = FALSE AND section_id = ?
++		ORDER BY sort_order ASC`
++
++		completedItemsQuery = `
++		SELECT id, section_id, name, description, completed, uncertain, COALESCE(quantity, 0), sort_order, created_at, COALESCE(updated_at, 0)
++		FROM items
++		WHERE completed = TRUE AND updated_at >= strftime("%s", strftime("%F", 'now')) AND section_id = ?
++		ORDER BY sort_order ASC`
+ 	}
+ 
+-	rows, err := DB.Query(query, sectionID)
++	itemRows, err := DB.Query(itemsQuery, sectionID)
+ 	if err != nil {
+ 		return nil, err
+ 	}
+-	defer rows.Close()
++	defer itemRows.Close()
++
++	completedItemRows, err := DB.Query(completedItemsQuery, sectionID)
++	if err != nil {
++		return nil, err
++	}
++	defer completedItemRows.Close()
+ 
+ 	var items []Item
+-	for rows.Next() {
++	for itemRows.Next() {
++		var i Item
++		err := itemRows.Scan(&i.ID, &i.SectionID, &i.Name, &i.Description, &i.Completed, &i.Uncertain, &i.Quantity, &i.SortOrder, &i.CreatedAt, &i.UpdatedAt)
++		if err != nil {
++			return nil, err
++		}
++		items = append(items, i)
++	}
++
++	for completedItemRows.Next() {
+ 		var i Item
+-		err := rows.Scan(&i.ID, &i.SectionID, &i.Name, &i.Description, &i.Completed, &i.Uncertain, &i.Quantity, &i.SortOrder, &i.CreatedAt, &i.UpdatedAt)
++		err := completedItemRows.Scan(&i.ID, &i.SectionID, &i.Name, &i.Description, &i.Completed, &i.Uncertain, &i.Quantity, &i.SortOrder, &i.CreatedAt, &i.UpdatedAt)
+ 		if err != nil {
+ 			return nil, err
+ 		}
