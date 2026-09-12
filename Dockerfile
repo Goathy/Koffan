@@ -1,6 +1,6 @@
 # Keep the build toolchain and runtime distribution explicit so security updates
 # are reviewable instead of depending on floating major-version tags.
-ARG GO_VERSION=1.26.5
+ARG GO_VERSION=1.26.6
 ARG ALPINE_VERSION=3.23
 
 # Build stage
