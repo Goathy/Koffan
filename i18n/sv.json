@@ -172,7 +172,17 @@
     "queued": "Sparad för synkronisering",
     "check_connection": "Kontrollera din anslutning",
     "not_saved_offline": "Den här listan är inte sparad offline.",
-    "back_to_home": "Tillbaka till startsidan"
+    "back_to_home": "Tillbaka till startsidan",
+    "sync_failed": "Vissa ändringar kunde inte sparas. Dina lokala ändringar finns fortfarande sparade på den här enheten.",
+    "retry": "Försök igen",
+    "discard_change": "Förkasta misslyckad ändring",
+    "discard_confirm": "Förkasta den här misslyckade ändringen? Ändringar som är beroende av den tas också bort.",
+    "full_crud": "Fortsätt handla utan internetanslutning. Ändringarna sparas på den här enheten och synkroniseras automatiskt när anslutningen kommer tillbaka.",
+    "can_manage_lists_sections": "Skapa, redigera och ta bort listor och sektioner",
+    "can_manage_products": "Lägga till, redigera och ta bort varor",
+    "can_update_products": "Ändra antal, bocka av varor och markera dem som osäkra",
+    "can_organize_products": "Flytta varor och ändra deras ordning",
+    "persistence_hint": "Dina ändringar finns kvar när du öppnar appen igen. Import och hantering av historik kräver internetanslutning."
   },
   "history": {
     "title": "Varuhistorik",

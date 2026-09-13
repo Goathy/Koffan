@@ -4,10 +4,14 @@ class OfflineStorage {
         this.dbName = 'koffan-offline';
         this.dbVersion = 5;  // Must be >= existing version in browser
         this.db = null;
+        this.initPromise = null;
     }
 
     async init() {
-        return new Promise((resolve, reject) => {
+        if (this.db) return this.db;
+        if (this.initPromise) return this.initPromise;
+
+        this.initPromise = new Promise((resolve, reject) => {
             const request = indexedDB.open(this.dbName, this.dbVersion);
 
             request.onerror = () => {
@@ -17,6 +21,15 @@ class OfflineStorage {
 
             request.onsuccess = () => {
                 this.db = request.result;
+                const db = this.db;
+                const resetConnection = () => {
+                    if (this.db === db) this.db = null;
+                };
+                db.onversionchange = () => {
+                    db.close();
+                    resetConnection();
+                };
+                db.onclose = resetConnection;
                 console.log('[OfflineStorage] Database opened successfully');
                 resolve(this.db);
             };
@@ -51,7 +64,10 @@ class OfflineStorage {
                     suggestionsStore.createIndex('usage_count', 'usage_count');
                 }
             };
+        }).finally(() => {
+            this.initPromise = null;
         });
+        return this.initPromise;
     }
 
     // ===== OFFLINE QUEUE METHODS =====
@@ -65,14 +81,16 @@ class OfflineStorage {
 
             const request = store.add({
                 ...action,
-                timestamp: Math.floor(Date.now() / 1000)  // Unix timestamp in seconds (matches server)
+                // Preserve the time of the tap when persistence waits for startup.
+                timestamp: action.timestamp ?? Math.floor(Date.now() / 1000)
             });
 
-            request.onsuccess = () => {
+            tx.oncomplete = () => {
                 console.log('[OfflineStorage] Action queued:', action.type);
                 resolve(request.result);
             };
             request.onerror = () => reject(request.error);
+            tx.onabort = () => reject(tx.error || new Error('Offline queue write aborted'));
         });
     }
 
@@ -98,8 +116,9 @@ class OfflineStorage {
             const store = tx.objectStore('offline_queue');
 
             const request = store.delete(id);
-            request.onsuccess = () => resolve();
+            tx.oncomplete = () => resolve();
             request.onerror = () => reject(request.error);
+            tx.onabort = () => reject(tx.error || new Error('Offline queue deletion aborted'));
         });
     }
 
@@ -111,8 +130,9 @@ class OfflineStorage {
             const store = tx.objectStore('offline_queue');
 
             const request = store.clear();
-            request.onsuccess = () => resolve();
+            tx.oncomplete = () => resolve();
             request.onerror = () => reject(request.error);
+            tx.onabort = () => reject(tx.error || new Error('Offline queue clear aborted'));
         });
     }
 
@@ -131,19 +151,26 @@ class OfflineStorage {
 
     // ===== SECTIONS CACHE METHODS =====
 
-    async saveSections(sections) {
+    async saveSections(sections, listId = null) {
         if (!this.db) await this.init();
 
         return new Promise((resolve, reject) => {
             const tx = this.db.transaction('sections', 'readwrite');
             const store = tx.objectStore('sections');
 
-            // Clear existing data
-            store.clear();
-
-            // Add new data
-            for (const section of sections) {
-                store.add(section);
+            if (listId === null || listId === undefined) {
+                store.clear();
+                for (const section of sections) store.add(section);
+            } else {
+                // The API returns one list at a time. Replace that list inside a
+                // single transaction without evicting other lists saved offline.
+                const request = store.getAll();
+                request.onsuccess = () => {
+                    for (const section of request.result || []) {
+                        if (String(section.list_id) === String(listId)) store.delete(section.id);
+                    }
+                    for (const section of sections) store.put({ ...section, list_id: listId });
+                };
             }
 
             tx.oncomplete = () => {
@@ -151,6 +178,7 @@ class OfflineStorage {
                 resolve();
             };
             tx.onerror = () => reject(tx.error);
+            tx.onabort = () => reject(tx.error || new Error('Offline cache write aborted'));
         });
     }
 
@@ -178,8 +206,9 @@ class OfflineStorage {
             const store = tx.objectStore('sync_metadata');
 
             const request = store.put({ key, value });
-            request.onsuccess = () => resolve();
+            tx.oncomplete = () => resolve();
             request.onerror = () => reject(request.error);
+            tx.onabort = () => reject(tx.error || new Error('Offline metadata write aborted'));
         });
     }
 
@@ -226,6 +255,7 @@ class OfflineStorage {
                 resolve();
             };
             tx.onerror = () => reject(tx.error);
+            tx.onabort = () => reject(tx.error || new Error('Offline suggestions write aborted'));
         });
     }
 
@@ -346,51 +376,40 @@ class OfflineStorage {
     // ===== OPTIMISTIC UPDATES =====
 
     async updateItemInCache(itemId, updates) {
+        return this.modifyCachedItem(itemId, (items, index) => {
+            items[index] = { ...items[index], ...updates };
+        });
+    }
+
+    async removeItemFromCache(itemId) {
+        return this.modifyCachedItem(itemId, (items, index) => items.splice(index, 1));
+    }
+
+    async modifyCachedItem(itemId, modify) {
         if (!this.db) await this.init();
 
-        const sections = await this.getSections();
-        let modified = false;
-
-        for (const section of sections) {
-            if (section.items) {
-                for (let i = 0; i < section.items.length; i++) {
-                    if (section.items[i].id === itemId) {
-                        section.items[i] = { ...section.items[i], ...updates };
+        // Keep the read and write in one transaction so simultaneous taps cannot
+        // overwrite each other's cached state with an earlier sections snapshot.
+        return new Promise((resolve, reject) => {
+            const tx = this.db.transaction('sections', 'readwrite');
+            const store = tx.objectStore('sections');
+            const request = store.getAll();
+            let modified = false;
+            request.onsuccess = () => {
+                for (const section of request.result || []) {
+                    const index = section.items?.findIndex(item => item.id === itemId) ?? -1;
+                    if (index !== -1) {
+                        modify(section.items, index);
+                        store.put(section);
                         modified = true;
                         break;
                     }
                 }
-            }
-            if (modified) break;
-        }
-
-        if (modified) {
-            await this.saveSections(sections);
-        }
-        return modified;
-    }
-
-    async removeItemFromCache(itemId) {
-        if (!this.db) await this.init();
-
-        const sections = await this.getSections();
-        let modified = false;
-
-        for (const section of sections) {
-            if (section.items) {
-                const index = section.items.findIndex(item => item.id === itemId);
-                if (index !== -1) {
-                    section.items.splice(index, 1);
-                    modified = true;
-                    break;
-                }
-            }
-        }
-
-        if (modified) {
-            await this.saveSections(sections);
-        }
-        return modified;
+            };
+            tx.oncomplete = () => resolve(modified);
+            tx.onerror = () => reject(tx.error);
+            tx.onabort = () => reject(tx.error || new Error('Offline item update aborted'));
+        });
     }
 }
 

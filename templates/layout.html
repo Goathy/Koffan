@@ -79,16 +79,8 @@
         function t(key, params) {
             const lang = window.currentLang;
             const keys = key.split('.');
-            let value = window.translations[lang];
-
-            for (const k of keys) {
-                if (value && typeof value === 'object' && k in value) {
-                    value = value[k];
-                } else {
-                    return key;
-                }
-            }
-
+            const lookup = language => keys.reduce((value, part) => value && typeof value === 'object' ? value[part] : undefined, window.translations[language]);
+            const value = lookup(lang) ?? lookup('en');
             if (typeof value !== 'string') return key;
 
             // Replace {{ "{{" }}param{{ "}}" }} placeholders
@@ -162,6 +154,35 @@
     <script src="{{asset "sortable.min.js"}}"></script>
 
     <style>
+        /* The same row is used for optimistic updates and server rendering. */
+        [data-sort-mode="alphabetical"] .drag-handle,
+        [data-sort-mode="alphabetical_desc"] .drag-handle { display: none; }
+        .shopping-item[data-completed="true"] {
+            padding-top: 0.625rem;
+            padding-bottom: 0.625rem;
+            gap: 0.75rem;
+        }
+        .shopping-item[data-completed="true"]:not(.bg-rose-50\/40) { background-color: transparent; }
+        .shopping-item[data-completed="true"]:hover { background-color: rgb(245 245 244 / 0.5); }
+        .dark .shopping-item[data-completed="true"]:hover { background-color: rgb(68 64 60 / 0.5); }
+        .shopping-item[data-completed="true"] .drag-handle,
+        .shopping-item[data-completed="true"] .item-active-actions,
+        .shopping-item[data-completed="true"] .item-uncertain { display: none; }
+        .shopping-item[data-completed="true"] .item-completed-delete { display: block; }
+        .shopping-item[data-completed="true"] .item-content { margin-left: 0; }
+        .shopping-item[data-completed="true"] .item-name,
+        .shopping-item[data-completed="true"] .item-quantity {
+            color: #a8a29e;
+            text-decoration-line: line-through;
+        }
+        .shopping-item[data-completed="true"] .item-description {
+            color: #d6d3d1;
+            text-decoration-line: line-through;
+            margin-top: 0;
+        }
+        .dark .shopping-item[data-completed="true"] .item-name,
+        .dark .shopping-item[data-completed="true"] .item-quantity,
+        .dark .shopping-item[data-completed="true"] .item-description { color: #78716c; }
         :root {
             --app-viewport-height: 100vh;
             --mobile-sheet-offset: 1rem;
@@ -480,7 +501,12 @@
 
     <script src="{{asset "viewport.js"}}"></script>
     <script src="{{asset "offline-storage.js"}}"></script>
+    <script src="{{asset "realtime.js"}}"></script>
+    <script>window.offlineBootstrap = {{.OfflineSnapshot | toJSON}};</script>
     <script src="{{asset "app.js"}}"></script>
+    <script src="{{asset "offline-crud.js"}}"></script>
+    <script src="{{asset "offline-view.js"}}"></script>
+    <script src="{{asset "offline-app.js"}}"></script>
     <script>
         window.ViewportHeight?.initViewportHeightSync(window, document);
     </script>
@@ -491,7 +517,7 @@
                 .then(reg => {
                     console.log('[App] Service Worker registered:', reg.scope);
                     // Force update check
-                    reg.update();
+                    reg.update().catch(() => { /* Offline launches keep the installed worker. */ });
                     // Listen for new SW and activate immediately
                     reg.addEventListener('updatefound', () => {
                         const newWorker = reg.installing;

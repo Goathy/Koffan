@@ -221,6 +221,9 @@ func main() {
 
 	// Main page - shows all lists
 	app.Get("/", handlers.GetListsPage)
+	app.Get("/offline/list", handlers.GetOfflineListShell)
+	app.Get("/api/offline/snapshot", handlers.GetOfflineSnapshot)
+	app.Post("/api/offline/sync", handlers.SyncOffline)
 
 	// Single list view - shows items
 	app.Get("/lists/:id", handlers.GetListView)

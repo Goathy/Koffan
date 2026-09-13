@@ -172,7 +172,17 @@
     "queued": "Salvato per la sincronizzazione",
     "check_connection": "Controlla la tua connessione",
     "not_saved_offline": "Questa lista non è salvata offline.",
-    "back_to_home": "Torna alla home page"
+    "back_to_home": "Torna alla home page",
+    "sync_failed": "Non è stato possibile salvare alcune modifiche. Le tue modifiche locali sono ancora salvate su questo dispositivo.",
+    "retry": "Riprova",
+    "discard_change": "Scarta la modifica non riuscita",
+    "discard_confirm": "Scartare questa modifica non riuscita? Verranno rimosse anche le modifiche che dipendono da essa.",
+    "full_crud": "Continua a fare la spesa senza connessione Internet. Le modifiche vengono salvate su questo dispositivo e sincronizzate automaticamente quando la connessione viene ripristinata.",
+    "can_manage_lists_sections": "Crea, modifica ed elimina liste e sezioni",
+    "can_manage_products": "Aggiungi, modifica ed elimina prodotti",
+    "can_update_products": "Modifica le quantità, spunta i prodotti acquistati e segnali come incerti",
+    "can_organize_products": "Sposta i prodotti e cambia il loro ordine",
+    "persistence_hint": "Le tue modifiche restano salvate quando riapri l’app. Le importazioni e la gestione della cronologia richiedono una connessione Internet."
   },
   "history": {
     "title": "Cronologia del prodotto",

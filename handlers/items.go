@@ -221,25 +221,35 @@ func DeleteCompletedItems(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{"deleted": count})
 }
 
-// ToggleItem toggles the completed status of an item
+// ToggleItem sets an explicit completion state, or toggles it for legacy clients.
 func ToggleItem(c *fiber.Ctx) error {
 	id, err := strconv.ParseInt(c.Params("id"), 10, 64)
 	if err != nil {
 		return sendError(c, 400, "error.invalid_id")
 	}
 
-	item, err := db.ToggleItemCompleted(id)
+	var item *db.Item
+	changed := true
+	if desired := c.FormValue("completed", "__missing__"); desired != "__missing__" || c.Request().PostArgs().Has("completed") {
+		if desired != "true" && desired != "false" {
+			return sendError(c, 400, "error.toggle_failed")
+		}
+		item, changed, err = db.SetItemCompleted(id, desired == "true")
+	} else {
+		item, err = db.ToggleItemCompleted(id)
+	}
 	if err != nil {
 		return sendError(c, 500, "error.toggle_failed")
 	}
 
-	// Broadcast to WebSocket clients
-	BroadcastUpdate("item_toggled", item)
-	event := webhook.EventItemUpdated
-	if item.Completed {
-		event = webhook.EventItemCompleted
+	if changed {
+		BroadcastUpdate("item_toggled", item)
+		event := webhook.EventItemUpdated
+		if item.Completed {
+			event = webhook.EventItemCompleted
+		}
+		NotifyItemWebhook(event, item)
 	}
-	NotifyItemWebhook(event, item)
 
 	// Return per-item partial (no section swap - client handles DOM move)
 	if item.Completed {
@@ -501,8 +511,14 @@ func UncheckAllItems(c *fiber.Ctx) error {
 
 // GetStats returns current stats as JSON (for Alpine.js updates)
 func GetStats(c *fiber.Ctx) error {
-	stats := db.GetStats()
-	return c.JSON(stats)
+	listID, err := requestedListID(c)
+	if err != nil {
+		return sendError(c, 400, "error.invalid_list_id")
+	}
+	if listID != 0 {
+		return c.JSON(db.GetListStats(listID))
+	}
+	return c.JSON(db.GetStats())
 }
 
 // GetItemVersion returns the current updated_at timestamp for an item (for offline sync conflict resolution)

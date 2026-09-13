@@ -1,5 +1,11 @@
 {{define "list"}}
-<div x-data="shoppingList()" x-init="init()" @refresh-list.window="refreshList()" class="min-h-screen pb-28 md:pb-8 bg-stone-50 dark:bg-stone-900 transition-colors" data-list-id="{{.List.ID}}" data-show-completed="{{.ShowCompleted}}">
+<div x-data="shoppingList()" x-init="init()" x-show="_crudReady" x-cloak @refresh-list.window="refreshList()" class="min-h-screen pb-28 md:pb-8 bg-stone-50 dark:bg-stone-900 transition-colors" data-list-id="{{.List.ID}}" data-show-completed="{{.ShowCompleted}}">
+    <div x-show="crudError" x-cloak role="alert" class="mx-auto max-w-4xl p-3 text-sm bg-amber-50 dark:bg-amber-950 text-amber-900 dark:text-amber-100">
+        <span x-text="crudError"></span>
+        <button @click="crudRetry()" class="underline ml-2" x-text="t('offline.retry')"></button>
+        <button x-show="_crudConflict" @click="crudDiscardConflict()" class="underline ml-2" x-text="t('offline.discard_change')"></button>
+    </div>
+
     <!-- Hidden input for iOS keyboard trick -->
     <input type="text" id="ios-keyboard-trigger" class="absolute opacity-0 pointer-events-none" style="position: absolute; top: -9999px; left: -9999px;" tabindex="-1" aria-hidden="true">
     <!-- Header -->
@@ -13,7 +19,7 @@
                     </a>
                     <span class="text-stone-300 dark:text-stone-600 text-sm md:text-base">/</span>
                     <div class="flex items-center gap-1.5 md:gap-2 overflow-hidden">
-                        {{if .List}}<span class="text-base md:text-xl">{{.List.Icon}}</span>{{end}}
+                        {{if .List}}<span data-list-icon class="text-base md:text-xl">{{.List.Icon}}</span>{{end}}
                         <button
                             @click="showListSwitcher = !showListSwitcher"
                             class="flex items-center gap-1.5 md:gap-2 overflow-hidden hover:opacity-70 transition-opacity"
@@ -313,7 +319,7 @@
             <div class="flex items-center gap-2">
                 <!-- Manage sections -->
                 <button
-                    @click="isOnline ? showManageSections = true : window.Toast.show(t('offline.action_blocked'), 'warning')"
+                    @click="showManageSections = true"
                     class="w-10 h-10 rounded-xl flex items-center justify-center transition-colors"
                     :class="isOnline ? 'bg-stone-100 dark:bg-stone-700 text-stone-600 dark:text-stone-300 hover:bg-stone-200 dark:hover:bg-stone-600' : 'bg-stone-50 dark:bg-stone-800 text-stone-300 dark:text-stone-600'"
                 >
@@ -450,10 +456,7 @@
 
             <!-- Add new section -->
             <form
-                hx-post="/sections"
-                hx-swap="none"
-                hx-on::after-request="if(event.detail.successful) { this.reset(); this.querySelector('.error-msg')?.remove(); const html = event.detail.xhr.responseText; const sl = document.getElementById('sections-list'); const _d = Alpine.$data(document.querySelector('[x-data]')); if (html && sl) { sl.insertAdjacentHTML('beforeend', html.trim()); window.checkEmptyStates(); Alpine.nextTick(() => _d.initMobileSortable()); } _d.refreshManageSectionsModal(); _d.refreshSectionSelectsFromServer(); }"
-                hx-on::response-error="handleSectionFormError(this, event.detail.xhr)"
+                @submit.prevent="crudCreateSection($el)"
                 class="flex flex-col gap-2 mb-6"
             >
                 <div class="flex gap-2">
@@ -647,7 +650,7 @@
                     </svg>
                 </button>
             </div>
-            <p class="text-sm text-stone-600 dark:text-stone-300 mb-4" x-text="t('offline.message')"></p>
+            <p class="text-sm text-stone-600 dark:text-stone-300 mb-4" x-text="t('offline.full_crud')"></p>
 
             <!-- Available actions -->
             <div class="bg-stone-50 dark:bg-stone-700 rounded-lg p-3 mb-4">
@@ -657,25 +660,25 @@
                         <svg class="w-4 h-4 text-emerald-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
                         </svg>
-                        <span x-text="t('offline.can_add')"></span>
+                        <span x-text="t('offline.can_manage_lists_sections')"></span>
                     </li>
                     <li class="flex items-center gap-2 text-sm text-stone-600 dark:text-stone-300">
                         <svg class="w-4 h-4 text-emerald-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
                         </svg>
-                        <span x-text="t('offline.can_toggle')"></span>
+                        <span x-text="t('offline.can_manage_products')"></span>
                     </li>
                     <li class="flex items-center gap-2 text-sm text-stone-600 dark:text-stone-300">
                         <svg class="w-4 h-4 text-emerald-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
                         </svg>
-                        <span x-text="t('offline.can_edit')"></span>
+                        <span x-text="t('offline.can_update_products')"></span>
                     </li>
                     <li class="flex items-center gap-2 text-sm text-stone-600 dark:text-stone-300">
                         <svg class="w-4 h-4 text-emerald-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
                         </svg>
-                        <span x-text="t('offline.can_uncertain')"></span>
+                        <span x-text="t('offline.can_organize_products')"></span>
                     </li>
                 </ul>
             </div>
@@ -684,7 +687,7 @@
                 <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
                 </svg>
-                <span x-text="t('offline.hint')"></span>
+                <span x-text="t('offline.persistence_hint')"></span>
             </div>
         </div>
     </div>
@@ -897,17 +900,13 @@
                 <div class="border-t border-stone-100 dark:border-stone-700 pt-6">
                     <button
                         @click="deleteCompletedItems()"
-                        :disabled="!isOnline"
-                        :class="isOnline
-                            ? 'bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/50 border-red-200 dark:border-red-800'
-                            : 'bg-stone-100 dark:bg-stone-800 text-stone-400 dark:text-stone-600 border-stone-200 dark:border-stone-700 cursor-not-allowed'"
-                        class="w-full flex items-center justify-center gap-2 p-3 rounded-xl border transition-colors">
+                        class="w-full flex items-center justify-center gap-2 p-3 rounded-xl border transition-colors bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 border-red-200 dark:border-red-800">
                         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
                         </svg>
                         <span x-text="t('settings.delete_completed')"></span>
                     </button>
-                    <p x-show="!isOnline" x-cloak class="text-xs text-stone-400 dark:text-stone-500 text-center" x-text="t('offline.action_blocked')"></p>
+
                 </div>
             </div>
 
@@ -1088,7 +1087,7 @@
         class="fixed top-16 left-4 md:left-auto md:ml-4 min-w-[240px] max-w-[300px] max-h-[60vh] overflow-y-auto bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 rounded-xl shadow-lg z-50"
         style="margin-left: max(1rem, calc((100vw - 56rem) / 2 + 1rem));"
     >
-        <div class="py-2">
+        <div id="crud-list-options" class="py-2">
             {{range .Lists}}
             <a
                 href="/lists/{{.ID}}/activate"

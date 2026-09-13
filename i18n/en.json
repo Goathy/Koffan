@@ -172,7 +172,17 @@
     "queued": "Saved for sync",
     "check_connection": "Check your connection",
     "not_saved_offline": "This list is not saved offline.",
-    "back_to_home": "Back to home page"
+    "back_to_home": "Back to home page",
+    "sync_failed": "Some changes could not be saved. Your local changes are still stored on this device.",
+    "retry": "Try again",
+    "discard_change": "Discard failed change",
+    "discard_confirm": "Discard this failed change? Changes that depend on it will also be removed.",
+    "full_crud": "Keep shopping without an internet connection. Changes are saved on this device and sync automatically when the connection returns.",
+    "can_manage_lists_sections": "Create, edit and delete lists and sections",
+    "can_manage_products": "Add, edit and delete products",
+    "can_update_products": "Change quantities, check items and mark them as uncertain",
+    "can_organize_products": "Move products and change their order",
+    "persistence_hint": "Your changes stay saved when you reopen the app. Imports and history management require an internet connection."
   },
   "history": {
     "title": "Product history",

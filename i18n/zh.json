@@ -172,7 +172,17 @@
     "queued": "已保存待同步",
     "check_connection": "检查您的网络连接",
     "not_saved_offline": "此列表未保存至离线。",
-    "back_to_home": "返回首页"
+    "back_to_home": "返回首页",
+    "sync_failed": "部分更改未能保存。您的本地更改仍保存在此设备上。",
+    "retry": "重试",
+    "discard_change": "放弃失败的更改",
+    "discard_confirm": "要放弃此失败的更改吗？依赖此更改的其他更改也将被移除。",
+    "full_crud": "没有网络也能继续购物。更改会保存在此设备上，并在网络恢复后自动同步。",
+    "can_manage_lists_sections": "创建、编辑和删除列表及分区",
+    "can_manage_products": "添加、编辑和删除商品",
+    "can_update_products": "修改数量、勾选商品并标记为不确定",
+    "can_organize_products": "移动商品并调整顺序",
+    "persistence_hint": "重新打开应用后，您的更改仍会保留。导入和历史记录管理需要网络连接。"
   },
   "history": {
     "title": "商品历史",

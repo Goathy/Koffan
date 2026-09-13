@@ -172,7 +172,17 @@
     "queued": "Uložené pre synchronizáciu",
     "check_connection": "Skontrolujte pripojenie",
     "not_saved_offline": "Tento zoznam nie je uložený offline.",
-    "back_to_home": "Späť na hlavnú stránku"
+    "back_to_home": "Späť na hlavnú stránku",
+    "sync_failed": "Niektoré zmeny sa nepodarilo uložiť. Tvoje lokálne zmeny zostávajú uložené v tomto zariadení.",
+    "retry": "Skúsiť znova",
+    "discard_change": "Zahodiť neúspešnú zmenu",
+    "discard_confirm": "Zahodiť túto neúspešnú zmenu? Odstránia sa aj zmeny, ktoré od nej závisia.",
+    "full_crud": "Nakupuj ďalej aj bez internetu. Zmeny sa ukladajú v tomto zariadení a po obnovení pripojenia sa automaticky synchronizujú.",
+    "can_manage_lists_sections": "Vytvárať, upravovať a mazať zoznamy a sekcie",
+    "can_manage_products": "Pridávať, upravovať a mazať produkty",
+    "can_update_products": "Meniť množstvá, označovať položky a označovať ich ako neisté",
+    "can_organize_products": "Presúvať produkty a meniť ich poradie",
+    "persistence_hint": "Zmeny zostanú uložené aj po opätovnom otvorení aplikácie. Import a správa histórie vyžadujú pripojenie k internetu."
   },
   "history": {
     "title": "História produktov",

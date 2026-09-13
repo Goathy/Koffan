@@ -629,19 +629,19 @@ func getItemsBySectionWithMode(sectionID int64, sortMode string) ([]Item, error)
 		SELECT id, section_id, name, description, completed, uncertain, COALESCE(quantity, 0), sort_order, created_at, COALESCE(updated_at, 0)
 		FROM items
 		WHERE section_id = ?
-		ORDER BY completed ASC, name COLLATE NOCASE ASC`
+		ORDER BY completed ASC, name COLLATE NOCASE ASC, id ASC`
 	case "alphabetical_desc":
 		query = `
 		SELECT id, section_id, name, description, completed, uncertain, COALESCE(quantity, 0), sort_order, created_at, COALESCE(updated_at, 0)
 		FROM items
 		WHERE section_id = ?
-		ORDER BY completed ASC, name COLLATE NOCASE DESC`
+		ORDER BY completed ASC, name COLLATE NOCASE DESC, id ASC`
 	default:
 		query = `
 		SELECT id, section_id, name, description, completed, uncertain, COALESCE(quantity, 0), sort_order, created_at, COALESCE(updated_at, 0)
 		FROM items
 		WHERE section_id = ?
-		ORDER BY completed ASC, sort_order ASC`
+		ORDER BY completed ASC, sort_order ASC, id ASC`
 	}
 
 	rows, err := DB.Query(query, sectionID)
@@ -809,6 +809,28 @@ func ToggleItemCompleted(id int64) (*Item, error) {
 		return nil, err
 	}
 	return GetItemByID(id)
+}
+
+// SetItemCompleted makes completion retries safe after a lost HTTP response.
+// Unchanged requests preserve updated_at and do not emit another change event.
+func SetItemCompleted(id int64, completed bool) (*Item, bool, error) {
+	var item Item
+	err := DB.QueryRow(`
+		UPDATE items SET completed = ?, updated_at = strftime('%s', 'now')
+		WHERE id = ? AND completed != ?
+		RETURNING id, section_id, name, description, completed, uncertain,
+		          COALESCE(quantity, 0), sort_order, created_at, COALESCE(updated_at, 0)
+	`, completed, id, completed).Scan(&item.ID, &item.SectionID, &item.Name,
+		&item.Description, &item.Completed, &item.Uncertain, &item.Quantity,
+		&item.SortOrder, &item.CreatedAt, &item.UpdatedAt)
+	if err == sql.ErrNoRows {
+		current, readErr := GetItemByID(id)
+		return current, false, readErr
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	return &item, true, nil
 }
 
 func ToggleItemUncertain(id int64) (*Item, error) {

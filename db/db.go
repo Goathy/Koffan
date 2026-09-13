@@ -98,6 +98,23 @@ func createTables() {
 		UNIQUE(name COLLATE NOCASE)
 	);
 
+	CREATE TABLE IF NOT EXISTS offline_operations (
+		client_id TEXT NOT NULL,
+		operation_id TEXT NOT NULL,
+		request_hash TEXT NOT NULL,
+		server_id INTEGER NOT NULL,
+		created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+		PRIMARY KEY (client_id, operation_id)
+	);
+
+	CREATE TABLE IF NOT EXISTS offline_entity_ids (
+		client_id TEXT NOT NULL,
+		entity TEXT NOT NULL,
+		temporary_id INTEGER NOT NULL,
+		server_id INTEGER NOT NULL,
+		PRIMARY KEY (client_id, entity, temporary_id)
+	);
+
 	CREATE TABLE IF NOT EXISTS webhook_outbox (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		event TEXT NOT NULL,

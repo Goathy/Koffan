@@ -4,10 +4,10 @@
 
 ### 1. Create a JSON File
 
-Copy `en.json` as a template and create a new file, e.g., `de.json` for German:
+Copy `en.json` as a template and create a new file, e.g., `da.json` for Danish:
 
 ```bash
-cp i18n/en.json i18n/de.json
+cp i18n/en.json i18n/da.json
 ```
 
 ### 2. Edit Metadata
@@ -17,13 +17,14 @@ At the beginning of the file, modify the `meta` section:
 ```json
 {
   "meta": {
-    "code": "de",        // ISO 639-1 code (2 letters)
-    "name": "Deutsch",   // Language name in that language
-    "flag": "DE"         // Country code (displayed as flag)
-  },
-  ...
+    "code": "da",
+    "name": "Dansk",
+    "flag": "DK"
+  }
 }
 ```
+
+Use the two-letter language code, the language's native name and its flag code. Update this section in the copied file while keeping all translation sections below it.
 
 ### 3. Translate All Keys
 
@@ -38,6 +39,8 @@ Translate values (NOT keys!) in each section:
 - `settings` - settings: title, language
 - `login` - login: title, subtitle, password, placeholder, button, error
 - `confirm` - confirmations: delete item, delete sections (with `{{name}}`, `{{count}}` parameters)
+- `offline` - offline capabilities, persistence, synchronization errors, retry and discard controls
+- Translate the remaining sections in `en.json` too, including lists, history, templates, imports and exports.
 
 ### 4. Rebuild the Application
 
@@ -54,7 +57,15 @@ The new language will automatically appear in the Settings language selector.
 
 ---
 
+## Updating Existing Text
+
+When adding or changing user-facing copy, update every supported language in the same change. This includes the offline modal and synchronization error and confirmation messages. English is the reference catalog; the English fallback handles missing keys at runtime but is not a substitute for a translation.
+
+Keep key names and `{{parameter}}` placeholders unchanged. Check that each affected key has a nonempty translated value in every catalog, that each file remains valid JSON, and that the rebuilt app serves the updated text. Rebuild and restart after translation changes because the catalogs are embedded in the binary.
+
 ## Translation File Structure
+
+The following is a shortened example. Copy the complete `en.json` file when adding a language.
 
 ```json
 {
@@ -130,29 +141,30 @@ The new language will automatically appear in the Settings language selector.
 }
 ```
 
-## Language Codes (ISO 639-1)
+## Supported Languages
 
-| Code | Language |
-|------|----------|
-| pl | Polski |
-| en | English |
-| de | Deutsch |
-| es | Español |
-| fr | Français |
-| it | Italiano |
-| pt | Português |
-| uk | Українська |
-| cs | Čeština |
-| sk | Slovenčina |
-| ru | Русский |
-| nl | Nederlands |
-| sv | Svenska |
-| no | Norsk |
-| da | Dansk |
-| fi | Suomi |
-| ja | 日本語 |
-| ko | 한국어 |
-| zh | 中文 |
+The app currently includes these 18 catalogs. Use the `meta.code` value for `DEFAULT_LANG` and language selection; Ukrainian uses code `uk` even though its file is named `ua.json`.
+
+| Code | Language | File |
+|------|----------|------|
+| `cs` | Čeština | `cs.json` |
+| `de` | Deutsch | `de.json` |
+| `el` | Ελληνικά | `el.json` |
+| `en` | English | `en.json` |
+| `es` | Español | `es.json` |
+| `fa` | فارسی | `fa.json` |
+| `fr` | Français | `fr.json` |
+| `it` | Italiano | `it.json` |
+| `lt` | Lietuvių | `lt.json` |
+| `nl` | Nederlands/Vlaams | `nl.json` |
+| `no` | Norsk | `no.json` |
+| `pl` | Polski | `pl.json` |
+| `pt` | Português | `pt.json` |
+| `ru` | Русский | `ru.json` |
+| `sk` | Slovenčina | `sk.json` |
+| `sv` | Svenska | `sv.json` |
+| `uk` | Українська | `ua.json` |
+| `zh` | 中文 | `zh.json` |
 
 ## Parameters in Translations
 
@@ -163,7 +175,9 @@ Some texts contain parameters in `{{param}}` format:
 
 Example:
 ```json
-"delete_item": "Delete \"{{name}}\"?"
+{
+  "delete_item": "Delete \"{{name}}\"?"
+}
 ```
 
 In JS code called as:

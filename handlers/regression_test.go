@@ -22,6 +22,7 @@ import (
 
 type concurrentWriteDetector struct {
 	active     atomic.Int32
+	writes     atomic.Int32
 	concurrent atomic.Bool
 }
 
@@ -31,6 +32,7 @@ func (writer *concurrentWriteDetector) beginWrite() {
 	}
 	time.Sleep(250 * time.Microsecond)
 	writer.active.Add(-1)
+	writer.writes.Add(1)
 }
 
 func (writer *concurrentWriteDetector) WriteJSON(interface{}) error {
@@ -40,6 +42,10 @@ func (writer *concurrentWriteDetector) WriteJSON(interface{}) error {
 
 func (writer *concurrentWriteDetector) WriteMessage(int, []byte) error {
 	writer.beginWrite()
+	return nil
+}
+
+func (writer *concurrentWriteDetector) SetWriteDeadline(time.Time) error {
 	return nil
 }
 
@@ -287,7 +293,11 @@ func TestItemUIHandlersEnforceLengthLimits(t *testing.T) {
 
 func TestConcurrentWebSocketBroadcastsUseSingleWriter(t *testing.T) {
 	detector := &concurrentWriteDetector{}
-	client := &webSocketClient{conn: detector}
+	client := newWebSocketClient(detector)
+	t.Cleanup(func() {
+		_ = client.close()
+		<-client.stopped
+	})
 
 	clientsMu.Lock()
 	originalClients := clients
@@ -314,6 +324,13 @@ func TestConcurrentWebSocketBroadcastsUseSingleWriter(t *testing.T) {
 		}()
 	}
 	waitGroup.Wait()
+	deadline := time.Now().Add(time.Second)
+	for detector.writes.Load() < 40 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if got := detector.writes.Load(); got != 40 {
+		t.Fatalf("completed writes = %d, want 40", got)
+	}
 
 	if detector.concurrent.Load() {
 		t.Fatal("websocket writes overlapped")

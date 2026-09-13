@@ -211,7 +211,13 @@ function shoppingList() {
         ws: null,
         connected: false,
         reconnectAttempts: 0,
-        maxReconnectAttempts: 5,
+        _realtime: null,
+        _mutationRevision: 0,
+        _sectionRequests: {},
+        _pendingCompletions: {},
+        _pendingActionCount: 0,
+        _queueWrites: 0,
+        _needsRefresh: false,
 
         // Offline support
         isOnline: navigator.onLine,
@@ -323,6 +329,24 @@ function shoppingList() {
             this.initWebSocket();
             this.initCompletedSectionsStore();
             this.initLocalActionTracking();
+            // Preserve the touched row until iOS delivers its click after pointerup.
+            this._onPointerDown = event => {
+                if (event.target.closest?.('[data-item-id]')) {
+                    clearTimeout(this._pointerRefreshTimer);
+                    this._pointerDown = true;
+                }
+            };
+            this._onPointerUp = () => {
+                if (!this._pointerDown) return;
+                clearTimeout(this._pointerRefreshTimer);
+                this._pointerRefreshTimer = setTimeout(() => {
+                    this._pointerDown = false;
+                    if (this._needsRefresh) this.fullRefresh();
+                }, 150);
+            };
+            document.addEventListener('pointerdown', this._onPointerDown, true);
+            document.addEventListener('pointerup', this._onPointerUp, true);
+            document.addEventListener('pointercancel', this._onPointerUp, true);
             this.cacheSuggestions();
 
             // Listen for mobile action modal
@@ -450,6 +474,7 @@ function shoppingList() {
         },
 
         markLocalAction(actionType) {
+            this._mutationRevision++;
             this.pendingLocalActions[actionType] = Date.now();
             // Auto-clear after timeout
             setTimeout(() => {
@@ -471,60 +496,105 @@ function shoppingList() {
         // ===== OFFLINE SUPPORT =====
 
         async initOffline() {
-            // Initialize IndexedDB
             try {
-                await window.offlineStorage.init();
+                this._storageInitialization = window.offlineStorage.init();
+                await this._storageInitialization;
                 this.offlineStorageReady = true;
-                console.log('[App] Offline storage initialized');
-
-                // Process any pending offline actions first (retry after reload)
-                if (this.isOnline) {
-                    const pendingCount = await window.offlineStorage.getQueueLength();
-                    if (pendingCount > 0) {
-                        console.log('[App] Found', pendingCount, 'pending offline actions, syncing...');
-                        await this.processOfflineQueue();
-                    }
-                    this.cacheData();
-                }
+                if (!navigator.onLine) await this.restoreCachedCompletions();
+                await this.restorePendingActions();
+                if (this.isOnline) await this.processOfflineQueue();
             } catch (error) {
-                console.error('[App] Failed to initialize offline storage:', error);
+                console.error('[App] Offline storage unavailable:', error);
             }
-
-            // Online/offline event listeners
-            window.addEventListener('online', async () => {
-                // Prevent double execution
-                if (this._onlineHandled) return;
-                this._onlineHandled = true;
-
-                console.log('[App] Back online');
+            this._onOnline = () => {
                 this.isOnline = true;
-
-                // Sync offline actions and refresh (no page reload)
-                const hadActions = await this.processOfflineQueue();
-                window.Toast.show(t('offline.back_online'), 'success', 2000);
-
-                // Only refresh if no queued actions (processOfflineQueue already refreshes)
-                if (!hadActions) {
-                    this.refreshList();
-                    this.refreshStats();
-                }
-            });
-
-            window.addEventListener('offline', () => {
-                console.log('[App] Gone offline');
+                this.connect();
+                this.fullRefresh();
+            };
+            this._onOffline = () => {
                 this.isOnline = false;
-                this._onlineHandled = false; // Reset for next online event
-            });
+                this._realtime?.pause();
+                this.connected = false;
+            };
+            window.addEventListener('online', this._onOnline);
+            window.addEventListener('offline', this._onOffline);
+        },
+
+        hasPendingChanges() {
+            return this._queueWrites > 0 || this._pendingActionCount > 0;
+        },
+
+        async request(url, options = {}) {
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), 8000);
+            try {
+                const response = await fetch(url, { ...options, cache: 'no-store', signal: controller.signal });
+                const body = await response.text();
+                return {
+                    ok: response.ok, status: response.status, redirected: response.redirected,
+                    headers: response.headers, url: response.url,
+                    text: async () => body, json: async () => JSON.parse(body)
+                };
+            } catch (error) {
+                this.isOnline = false;
+                throw error;
+            } finally {
+                clearTimeout(timeout);
+            }
+        },
+
+        async restoreCachedCompletions() {
+            if (this._cacheRestored || !this.offlineStorageReady) return;
+            try {
+                const sections = await window.offlineStorage.getSections();
+                for (const section of sections) {
+                    for (const item of section.items || []) {
+                        await this._applyOfflineToggle(item.id, section.id, item.completed, false);
+                    }
+                }
+                this._cacheRestored = true;
+            } catch (error) {
+                console.warn('[Cache] Could not restore cached completions:', error);
+            }
+        },
+
+        async restorePendingActions() {
+            if (!this.offlineStorageReady) return;
+            const actions = await window.offlineStorage.getQueuedActions();
+            this._pendingActionCount = actions.length;
+            const pending = {};
+            for (const action of actions) {
+                if (action.type === 'toggle_item' && action.completed !== undefined) {
+                    const id = this.extractItemId(action.url);
+                    if (id) {
+                        pending[id] = action.completed;
+                        await this._applyOfflineToggle(id, action.sectionId, action.completed);
+                    }
+                } else if (action.type === 'create_item' && action.tempId && !document.getElementById(`item-${action.tempId}`)) {
+                    const body = new URLSearchParams(action.body);
+                    const section = document.getElementById(`section-${body.get('section_id')}`);
+                    const container = section?.querySelector('.active-items');
+                    if (container) {
+                        container.insertAdjacentHTML('beforeend', createOfflineItemHtml(action.tempId, body.get('name') || '', body.get('description') || '', body.get('section_id')));
+                        section.classList.remove('hidden');
+                        this.updateSectionCounter(section);
+                    }
+                }
+            }
+            this._pendingCompletions = pending;
         },
 
         async cacheData() {
-            if (!this.offlineStorageReady) return;
+            if (!this.offlineStorageReady || this.hasPendingChanges()) return;
 
+            const revision = this._mutationRevision;
             try {
-                const response = await fetch('/api/data');
+                const listId = this.currentListId();
+                const response = await this.request(listId ? `/api/data?list_id=${listId}` : '/api/data');
                 if (response.ok) {
                     const data = await response.json();
-                    await window.offlineStorage.saveSections(data.sections || []);
+                    if (this.hasPendingChanges() || revision !== this._mutationRevision) return;
+                    await window.offlineStorage.saveSections(data.sections || [], this.currentListId());
                     await window.offlineStorage.setLastSyncTimestamp(data.timestamp);
                     console.log('[App] Data cached for offline use');
                 }
@@ -534,100 +604,77 @@ function shoppingList() {
         },
 
         async queueOfflineAction(action) {
-            if (!this.offlineStorageReady) {
-                console.warn('[App] Offline storage not ready, action lost:', action);
-                return;
+            this._queueWrites++;
+            try {
+                if (!this.offlineStorageReady) {
+                    await this._storageInitialization;
+                    if (!this.offlineStorageReady) throw new Error('Offline storage unavailable');
+                }
+                const id = await window.offlineStorage.queueAction(action);
+                this._pendingActionCount++;
+                this.scheduleQueueRetry();
+                return id;
+            } finally {
+                this._queueWrites--;
             }
-
-            await window.offlineStorage.queueAction(action);
-            console.log('[App] Action queued for sync:', action.type);
         },
 
         async processOfflineQueue() {
-            if (this.processingQueue || !this.isOnline || !this.offlineStorageReady) return false;
-
-            this.processingQueue = true;
-            console.log('[App] Processing offline queue...');
-
-            try {
-                const actions = await window.offlineStorage.getQueuedActions();
-
-                if (actions.length === 0) {
-                    console.log('[App] No queued actions');
-                    this.processingQueue = false;
-                    return false;
-                }
-
-                console.log('[App] Processing', actions.length, 'queued actions');
-
-                for (const action of actions) {
-                    try {
-                        // For all modifying actions - check server version (Last Write Wins)
-                        if (action.type === 'toggle_item' || action.type === 'update_item' || action.type === 'edit_item') {
-                            const itemId = this.extractItemId(action.url);
-                            if (itemId) {
-                                const serverVersion = await this.getItemVersion(itemId);
-                                if (serverVersion && serverVersion.updated_at > action.timestamp) {
-                                    // Server has newer version - skip offline action
-                                    console.log('[Sync] Server version newer, skipping:', action.type,
-                                        'server:', serverVersion.updated_at, 'offline:', action.timestamp);
-                                    await window.offlineStorage.clearAction(action.id);
-                                    continue;
-                                }
+            if (this._queuePromise) return this._queuePromise;
+            if (!this.isOnline || !this.offlineStorageReady) return false;
+            const sync = async () => {
+                this.processingQueue = true;
+                let hadActions = false;
+                try {
+                    // Re-read after each write, including changes added during a slow request.
+                    for (let count = 0; count < 100; count++) {
+                        const actions = await window.offlineStorage.getQueuedActions();
+                        this._pendingActionCount = actions.length;
+                        if (!actions.length) break;
+                        hadActions = true;
+                        const action = actions[0];
+                        const response = await this.request(action.url, {
+                            method: action.method, headers: action.headers || {}, body: action.body || undefined
+                        });
+                        if (response.redirected || (!response.ok && response.status !== 404)) {
+                            // Never mistake a login page or a failed save for an acknowledgement.
+                            if (response.redirected || response.status === 401 || response.status === 403) {
+                                this._syncNeedsLogin = true;
+                                window.Toast?.show(t('error.update_failed'), 'warning');
                             }
+                            break;
                         }
-
-                        const fetchOptions = {
-                            method: action.method,
-                            headers: action.headers || {}
-                        };
-
-                        if (action.body) {
-                            fetchOptions.body = action.body;
-                        }
-
-                        const response = await fetch(action.url, fetchOptions);
-
-                        if (response.ok || response.status === 404) {
-                            // Success or item no longer exists - remove from queue
-                            await window.offlineStorage.clearAction(action.id);
-                            console.log('[App] Synced action:', action.type);
-                        } else {
-                            console.error('[App] Failed to sync action:', action.type, response.status);
-                        }
-                    } catch (error) {
-                        console.error('[App] Error syncing action:', action.type, error);
-                        // Keep in queue for retry
+                        await window.offlineStorage.clearAction(action.id);
+                        this._mutationRevision++;
                     }
+                } catch (error) {
+                    this.isOnline = false;
+                    await this.restoreCachedCompletions();
+                    console.warn('[Sync] Keeping unsent changes for retry:', error);
+                } finally {
+                    this.processingQueue = false;
+                    // Do not replace the pending map while a newer tap is being committed.
+                    if (!this._queueWrites) await this.restorePendingActions();
+                    if (this.hasPendingChanges() && !this._syncNeedsLogin) this.scheduleQueueRetry();
                 }
-
-                // Refresh data after sync - small delay to ensure server processed all changes
-                await new Promise(resolve => setTimeout(resolve, 150));
-                await this.cacheData();
-
-                // Refresh sections list using lightweight per-section fetches
-                this.refreshList(false);
-                this.refreshStats();
-                console.log('[App] Offline queue processed, UI refreshed');
-
-                return true; // Had queued actions
-
-            } finally {
-                this.processingQueue = false;
-            }
+                return hadActions;
+            };
+            // Two open tabs share IndexedDB: only one may replay the queue at a time.
+            this._queuePromise = (navigator.locks
+                ? navigator.locks.request('koffan-offline-sync', sync)
+                : sync()).finally(() => { this._queuePromise = null; });
+            return this._queuePromise;
         },
 
-        // Get item version from server for conflict resolution
-        async getItemVersion(itemId) {
-            try {
-                const response = await fetch(`/api/item/${itemId}/version`);
-                if (response.ok) {
-                    return await response.json();
+        scheduleQueueRetry() {
+            if (this._queueRetryTimer) return;
+            this._queueRetryTimer = setTimeout(() => {
+                this._queueRetryTimer = null;
+                if (navigator.onLine && document.visibilityState !== 'hidden') {
+                    this.isOnline = true;
+                    this.fullRefresh();
                 }
-            } catch (e) {
-                console.error('[Sync] Failed to get item version:', e);
-            }
-            return null;
+            }, 5000);
         },
 
         // Extract item ID from URL like /items/123/toggle
@@ -637,39 +684,33 @@ function shoppingList() {
         },
 
         async fullRefresh() {
-            console.log('[App] Full refresh triggered');
-
-            // Suppress WS-driven refreshes during full refresh to prevent race conditions
-            this._fullRefreshInProgress = true;
-
-            // Reconnect WebSocket if needed
-            const wsOpen = this.ws && this.ws.readyState === WebSocket.OPEN;
-            if (!wsOpen && this.isOnline) {
-                console.log('[App] Reconnecting');
-                this.reconnectAttempts = 0;
-                this.connect();
-            }
-
-            try {
-                if (this.isOnline) {
-                    const hadQueuedActions = await this.processOfflineQueue();
-
-                    if (!hadQueuedActions) {
-                        // Smooth per-section update instead of full innerHTML swap
-                        await this.refreshSectionsSmooth();
-                        this.refreshStats();
-                    }
-
-                    this.cacheData();
+            if (this._fullRefreshPromise) return this._fullRefreshPromise;
+            this._fullRefreshPromise = (async () => {
+                this._fullRefreshInProgress = true;
+                try {
+                    if (!navigator.onLine) return;
+                    this.isOnline = true;
+                    await this.processOfflineQueue();
+                    if (this.hasPendingChanges()) return;
+                    await this.refreshSectionsSmooth();
+                    this.refreshStats();
+                    await this.cacheData();
+                } finally {
+                    this._fullRefreshInProgress = false;
                 }
-            } finally {
-                this._fullRefreshInProgress = false;
-            }
+            })().finally(() => {
+                this._fullRefreshPromise = null;
+                if (this.hasPendingChanges() && !this._syncNeedsLogin) this.scheduleQueueRetry();
+                if (this._needsRefresh && !this.hasPendingChanges() && this.isOnline) {
+                    this._needsRefresh = false;
+                    this.refreshList(false);
+                }
+            });
+            return this._fullRefreshPromise;
         },
 
         async refreshSectionsSmooth() {
-            // Delegates to refreshList which now uses lightweight per-section fetches
-            this.refreshList(false);
+            return this.refreshList(false);
         },
 
         // Wrapper for fetch that queues action when offline
@@ -696,92 +737,64 @@ function shoppingList() {
         initWebSocket() {
             if (this._wsInitialized) return;
             this._wsInitialized = true;
-
-            this.connect();
-
-            document.addEventListener('visibilitychange', () => {
-                if (document.visibilityState === 'visible') {
-                    this.fullRefresh();
+            this._onVisibility = () => {
+                if (document.visibilityState === 'hidden') {
+                    this._pointerDown = false;
+                    this._realtime?.pause();
+                    return;
                 }
-            });
+                this._syncNeedsLogin = false;
+                this.connect();
+                this.fullRefresh();
+            };
+            this._onPageShow = () => { this.connect(); this.fullRefresh(); };
+            this._onPageHide = () => this._realtime?.pause();
+            document.addEventListener('visibilitychange', this._onVisibility);
+            window.addEventListener('pageshow', this._onPageShow);
+            window.addEventListener('pagehide', this._onPageHide);
+            this.connect();
         },
 
         connect() {
-            // Close existing connection to prevent duplicates
-            if (this.ws) {
-                this.ws.onclose = null; // Prevent scheduleReconnect from firing
-                this.ws.close();
-                this.ws = null;
+            if (!navigator.onLine || document.visibilityState === 'hidden') return;
+            if (!this._realtime) {
+                this._realtime = new window.KoffanRealtime({
+                    url: () => `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws`,
+                    onConnected: () => {
+                        this.ws = this._realtime.socket;
+                        this.connected = true;
+                        this.isOnline = true;
+                        // Events missed while suspended cannot be recovered from the socket alone.
+                        this.fullRefresh();
+                    },
+                    onDisconnected: () => {
+                        this.connected = false;
+                        if (!this._destroyed && navigator.onLine && document.visibilityState !== 'hidden') this.fullRefresh();
+                    },
+                    onMessage: data => this.handleMessage(data)
+                });
+                this._realtime.start();
+            } else {
+                this._realtime.reconnect();
             }
-            this.stopPingPong();
-
-            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const wsUrl = `${protocol}//${window.location.host}/ws`;
-
-            try {
-                this.ws = new WebSocket(wsUrl);
-
-                this.ws.onopen = () => {
-                    console.log('WebSocket connected');
-                    this.connected = true;
-                    this.reconnectAttempts = 0;
-                };
-
-                this.ws.onclose = () => {
-                    console.log('WebSocket disconnected');
-                    this.connected = false;
-                    this.stopPingPong();
-                    this.scheduleReconnect();
-                };
-
-                this.ws.onerror = (error) => {
-                    console.error('WebSocket error:', error);
-                };
-
-                this.ws.onmessage = (event) => {
-                    this.handleMessage(event.data);
-                };
-
-                this.startPingPong();
-            } catch (error) {
-                console.error('Failed to create WebSocket:', error);
-                this.scheduleReconnect();
-            }
+            this.ws = this._realtime.socket;
         },
 
-        scheduleReconnect() {
-            if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-                console.log('Max reconnection attempts reached');
-                return;
-            }
-
-            // Clear any pending reconnect timer
-            if (this._reconnectTimer) {
-                clearTimeout(this._reconnectTimer);
-            }
-
-            this.reconnectAttempts++;
-            const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 30000);
-            this._reconnectTimer = setTimeout(() => {
-                this._reconnectTimer = null;
-                this.connect();
-            }, delay);
-        },
-
-        startPingPong() {
-            this.stopPingPong();
-            this._pingInterval = setInterval(() => {
-                if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-                    this.ws.send(JSON.stringify({ type: 'ping' }));
-                }
-            }, 30000);
-        },
-
-        stopPingPong() {
-            if (this._pingInterval) {
-                clearInterval(this._pingInterval);
-                this._pingInterval = null;
-            }
+        destroy() {
+            this._destroyed = true;
+            this._realtime?.stop();
+            clearTimeout(this._structuralRefreshTimer);
+            clearTimeout(this._pointerRefreshTimer);
+            document.removeEventListener('pointerdown', this._onPointerDown, true);
+            document.removeEventListener('pointerup', this._onPointerUp, true);
+            document.removeEventListener('pointercancel', this._onPointerUp, true);
+            clearTimeout(this._queueRetryTimer);
+            clearTimeout(this._refreshStatsTimer);
+            window.removeEventListener('online', this._onOnline);
+            window.removeEventListener('offline', this._onOffline);
+            window.removeEventListener('pageshow', this._onPageShow);
+            window.removeEventListener('pagehide', this._onPageHide);
+            document.removeEventListener('visibilitychange', this._onVisibility);
         },
 
         handleMessage(data) {
@@ -790,17 +803,23 @@ function shoppingList() {
                 console.log('WebSocket message:', message.type);
 
                 // Skip refresh-triggering messages during full refresh (background return)
-                if (this._fullRefreshInProgress && message.type !== 'pong') {
-                    console.log(`[App] Skipping WebSocket message '${message.type}' - full refresh in progress`);
+                if ((this._fullRefreshInProgress || this.hasPendingChanges() || this._pointerDown) && message.type !== 'pong') {
+                    this._needsRefresh = true;
                     return;
                 }
 
+                if (message.type !== 'pong') this._mutationRevision++;
                 const sectionId = message.data?.section_id;
 
                 switch (message.type) {
                     case 'section_created':
-                        // Skip on creating client - HTMX already handled DOM insertion
-                        if (!this.isLocalAction('section_created')) {
+                        // HTMX owns the local insertion; reconcile after its response as well.
+                        if (this.isLocalAction('section_created')) {
+                            clearTimeout(this._structuralRefreshTimer);
+                            this._structuralRefreshTimer = setTimeout(() => this.refreshList(false), 1200);
+                            break;
+                        }
+                        {
                             // Add new section to DOM without refreshing the entire list
                             if (message.data?.id) {
                                 const sectionsList = document.getElementById('sections-list');
@@ -829,7 +848,7 @@ function shoppingList() {
                         }
                         break;
                     case 'section_updated':
-                        if (!this.isLocalAction('section_updated')) {
+                        {
                             // Refresh only the changed section, not the entire list
                             if (message.data?.id) {
                                 this.refreshSection(message.data.id);
@@ -839,7 +858,7 @@ function shoppingList() {
                         }
                         break;
                     case 'section_deleted':
-                        if (!this.isLocalAction('section_deleted')) {
+                        {
                             // Remove section from DOM
                             if (message.data?.id) {
                                 const delEl = document.getElementById(`section-${message.data.id}`);
@@ -855,7 +874,7 @@ function shoppingList() {
                         }
                         break;
                     case 'sections_deleted':
-                        if (!this.isLocalAction('sections_deleted')) {
+                        {
                             // Remove multiple sections from DOM
                             if (message.data?.ids) {
                                 for (const id of message.data.ids) {
@@ -873,14 +892,14 @@ function shoppingList() {
                         }
                         break;
                     case 'sections_reordered':
-                        if (!this.isLocalAction('sections_reordered')) {
+                        {
                             // Lightweight reorder - move existing DOM elements
                             this.reorderSections();
                             this.refreshManageSectionsModal();
                         }
                         break;
                     case 'item_created':
-                        if (!this.isLocalAction('item_created')) {
+                        {
                             const itemId = message.data?.id;
                             if (itemId && sectionId) {
                                 this.insertRemoteItem(itemId, sectionId);
@@ -891,7 +910,7 @@ function shoppingList() {
                         this.refreshStats();
                         break;
                     case 'item_moved':
-                        if (!this.isLocalAction('item_moved')) {
+                        {
                             const fromId = message.data?.from_section_id;
                             const toId = message.data?.section_id;
                             if (fromId) this.refreshSection(fromId);
@@ -900,7 +919,7 @@ function shoppingList() {
                         this.refreshStats();
                         break;
                     case 'item_deleted':
-                        if (!this.isLocalAction('item_deleted')) {
+                        {
                             const delItemId = message.data?.id;
                             if (delItemId && sectionId) {
                                 this.removeRemoteItem(delItemId, sectionId);
@@ -911,12 +930,12 @@ function shoppingList() {
                         this.refreshStats();
                         break;
                     case 'items_reordered':
-                        if (!this.isLocalAction('items_reordered')) {
+                        {
                             sectionId ? this.refreshSection(sectionId) : this.refreshList();
                         }
                         break;
                     case 'item_toggled':
-                        if (!this.isLocalAction('item_toggled')) {
+                        {
                             const togItemId = message.data?.id;
                             const togCompleted = message.data?.completed;
                             if (togItemId && sectionId) {
@@ -928,7 +947,7 @@ function shoppingList() {
                         this.refreshStats();
                         break;
                     case 'item_updated':
-                        if (!this.isLocalAction('item_updated')) {
+                        {
                             const updItemId = message.data?.id;
                             if (updItemId) {
                                 this.replaceRemoteItem(updItemId);
@@ -944,24 +963,24 @@ function shoppingList() {
                         this.refreshStats();
                         break;
                     case 'section_sort_changed':
-                        if (!this.isLocalAction('section_sort_changed')) {
+                        {
                             sectionId ? this.refreshSection(sectionId) : this.refreshList();
                         }
                         break;
                     case 'section_items_checked':
-                        if (!this.isLocalAction('section_items_checked')) {
+                        {
                             sectionId ? this.refreshSection(sectionId) : this.refreshList();
                         }
                         this.refreshStats();
                         break;
                     case 'section_items_unchecked':
-                        if (!this.isLocalAction('section_items_unchecked')) {
+                        {
                             sectionId ? this.refreshSection(sectionId) : this.refreshList();
                         }
                         this.refreshStats();
                         break;
                     case 'completed_items_deleted':
-                        if (!this.isLocalAction('completed_items_deleted')) {
+                        {
                             this.removeAllCompletedItemsFromDOM();
                         }
                         this.refreshStats();
@@ -972,7 +991,7 @@ function shoppingList() {
                         if (message.data?.id) {
                             const currentListId = document.querySelector('[data-list-id]')?.dataset?.listId;
                             if (String(message.data.id) === currentListId) {
-                                if (!this.isLocalAction('list_updated')) {
+                                {
                                     if (message.data.show_completed !== undefined) {
                                         this.showCompleted = message.data.show_completed;
                                     }
@@ -990,68 +1009,51 @@ function shoppingList() {
         },
 
         refreshList(showOverlay = true) {
-            // Debounce - prevent multiple rapid refreshes
-            if (this._refreshListTimer) {
-                clearTimeout(this._refreshListTimer);
-            }
-
-            this._refreshListTimer = setTimeout(async () => {
-                if (this._isRefreshing) return;
-                this._isRefreshing = true;
-
-                try {
-                    // Fetch current sections list as JSON
-                    const listId = this.currentListId();
-                    const sectionsUrl = listId ? `/sections/list?format=json&list_id=${listId}` : '/sections/list?format=json';
-                    const resp = await fetch(sectionsUrl);
-                    if (!resp.ok) { this._isRefreshing = false; return; }
-                    const sections = await resp.json();
-                    const sectionsList = document.getElementById('sections-list');
-                    if (!sectionsList) { this._isRefreshing = false; return; }
-
-                    const serverIds = new Set(sections.map(s => s.id));
-                    const domIds = new Set();
-                    sectionsList.querySelectorAll(':scope > [id^="section-"]').forEach(el => {
-                        const id = parseInt(el.id.replace('section-', ''));
-                        if (id) domIds.add(id);
-                    });
-
-                    // Remove sections no longer on server
-                    for (const id of domIds) {
-                        if (!serverIds.has(id)) {
-                            const el = document.getElementById(`section-${id}`);
-                            if (el) { Alpine.destroyTree(el); el.remove(); }
+            this._refreshAgain = true;
+            if (this._refreshPromise) return this._refreshPromise;
+            this._refreshPromise = (async () => {
+                while (this._refreshAgain) {
+                    this._refreshAgain = false;
+                    if (this.hasPendingChanges() || this._pointerDown) { this._needsRefresh = true; return; }
+                    const revision = this._mutationRevision;
+                    try {
+                        const listId = this.currentListId();
+                        const url = listId ? `/sections/list?format=json&list_id=${listId}` : '/sections/list?format=json';
+                        const response = await this.request(url);
+                        if (!response.ok || response.redirected) return;
+                        const sections = await response.json();
+                        const container = document.getElementById('sections-list');
+                        if (!container || !Array.isArray(sections)) return;
+                        if (this._pointerDown) { this._needsRefresh = true; return; }
+                        if (revision !== this._mutationRevision || this.hasPendingChanges()) {
+                            this._refreshAgain = !this.hasPendingChanges();
+                            this._needsRefresh = true;
+                            continue;
                         }
-                    }
-
-                    // Refresh existing + add new sections
-                    for (const section of sections) {
-                        const el = document.getElementById(`section-${section.id}`);
-                        if (el) {
-                            await this.refreshSection(section.id);
-                        } else {
-                            const r = await fetch(`/sections/${section.id}/html`);
-                            if (r.ok) {
-                                const html = await r.text();
-                                sectionsList.insertAdjacentHTML('beforeend', html.trim());
-                            }
+                        const ids = new Set(sections.map(section => String(section.id)));
+                        const seen = new Set();
+                        container.querySelectorAll(':scope > [id^="section-"]').forEach(el => {
+                            if (!ids.has(el.dataset.sectionId) || seen.has(el.dataset.sectionId)) {
+                                Alpine.destroyTree(el); el.remove();
+                            } else { seen.add(el.dataset.sectionId); }
+                        });
+                        for (const section of sections) await this.refreshSection(section.id, true);
+                        if (this._pointerDown || this.hasPendingChanges()) { this._needsRefresh = true; return; }
+                        for (const section of sections) {
+                            const el = document.getElementById(`section-${section.id}`);
+                            if (el) container.appendChild(el);
                         }
+                        window.checkEmptyStates();
+                        this.$nextTick(() => this.initMobileSortable());
+                        this.updateSectionSelects(sections);
+                    } catch (error) {
+                        await this.restoreCachedCompletions();
+                        await this.restorePendingActions();
+                        console.warn('[App] Refresh deferred until connection recovers:', error);
                     }
-
-                    // Fix order (like reorderSections)
-                    for (const section of sections) {
-                        const el = document.getElementById(`section-${section.id}`);
-                        if (el) sectionsList.appendChild(el);
-                    }
-
-                    this.$nextTick(() => this.initMobileSortable());
-                    this.updateSectionSelects(sections);
-                } catch (e) {
-                    console.error('[App] refreshList failed:', e);
                 }
-
-                this._isRefreshing = false;
-            }, 100); // 100ms debounce
+            })().finally(() => { this._refreshPromise = null; });
+            return this._refreshPromise;
         },
 
         async cycleSortMode(sectionId, currentMode) {
@@ -1095,29 +1097,34 @@ function shoppingList() {
             }
         },
 
-        async refreshSection(sectionId) {
-            if (!document.getElementById(`section-${sectionId}`)) return;
-
+        async refreshSection(sectionId, allowInsert = false) {
+            if (this.hasPendingChanges() || this._pointerDown) { this._needsRefresh = true; return; }
+            if (!allowInsert && !document.getElementById(`section-${sectionId}`)) return;
+            const revision = this._mutationRevision;
+            const requestId = (this._sectionRequests[sectionId] || 0) + 1;
+            this._sectionRequests[sectionId] = requestId;
             try {
-                const resp = await fetch(`/sections/${sectionId}/html`);
-                if (!resp.ok) return;
-                const html = await resp.text();
-                // Re-lookup after fetch - element may have been replaced by a concurrent refresh
+                const response = await this.request(`/sections/${sectionId}/html`);
+                if (!response.ok || response.redirected) return;
+                const html = await response.text();
+                if (this._sectionRequests[sectionId] !== requestId) return;
+                if (this._pointerDown) { this._needsRefresh = true; return; }
+                if (revision !== this._mutationRevision || this.hasPendingChanges()) {
+                    this._needsRefresh = true;
+                    if (!this.hasPendingChanges()) this.refreshList(false);
+                    return;
+                }
                 const section = document.getElementById(`section-${sectionId}`);
-                if (!section) return;
-                section.insertAdjacentHTML('afterend', html.trim());
-                // Remove old section first to prevent duplicates, then clean up Alpine
-                section.remove();
-                try { Alpine.destroyTree(section); } catch (_) {}
-                this.$nextTick(() => {
-                    const el = document.getElementById(`section-${sectionId}`);
-                    if (el) {
-                        const container = el.querySelector('.items-sortable');
-                        if (container) this.initSortableForContainer(container);
-                    }
-                });
-            } catch (e) {
-                console.error('[App] refreshSection failed:', e);
+                if (section) {
+                    section.insertAdjacentHTML('afterend', html.trim());
+                    section.remove();
+                    try { Alpine.destroyTree(section); } catch (_) {}
+                } else if (allowInsert) {
+                    document.getElementById('sections-list')?.insertAdjacentHTML('beforeend', html.trim());
+                }
+                this.$nextTick(() => this.initMobileSortable());
+            } catch (error) {
+                console.warn('[App] Section refresh failed:', error);
             }
         },
 
@@ -1340,10 +1347,14 @@ function shoppingList() {
             }
 
             this._refreshStatsTimer = setTimeout(async () => {
+                if (this.hasPendingChanges()) return;
+                const revision = this._mutationRevision;
                 try {
-                    const response = await fetch('/stats');
+                    const listId = this.currentListId();
+                    const response = await this.request(listId ? `/stats?list_id=${listId}` : '/stats');
                     if (response.ok) {
                         const data = await response.json();
+                        if (this.hasPendingChanges() || revision !== this._mutationRevision) return;
                         // JSON uses snake_case
                         this.stats = {
                             total: data.total_items || 0,
@@ -1540,143 +1551,123 @@ function shoppingList() {
             }
         },
 
-        // Toggle item completed status via fetch (no HTMX - avoids section re-render)
+        // Persist the desired state before sending. Retrying a lost response must not invert it.
         _toggleInFlight: {},
         async toggleItem(itemId, sectionId) {
-            // Prevent concurrent toggles on the same item
             if (this._toggleInFlight[itemId]) return;
+            const item = document.getElementById(`item-${itemId}`);
+            if (!item) return;
+            const previous = item.querySelector('button > span')?.classList.contains('bg-pink-400') || false;
+            const completed = !previous;
             this._toggleInFlight[itemId] = true;
-
+            this._pendingCompletions[itemId] = completed;
             this.markLocalAction('item_toggled');
-
+            const action = {
+                type: 'toggle_item', url: `/items/${itemId}/toggle`, method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: `completed=${completed}`, completed, sectionId,
+                timestamp: Math.floor(Date.now() / 1000)
+            };
             try {
-                const response = await this.offlineFetch(
-                    `/items/${itemId}/toggle`,
-                    { method: 'POST' },
-                    'toggle_item'
-                );
-
-                if (response.offline) {
-                    await this._applyOfflineToggle(itemId, sectionId);
-                    return;
-                }
-
-                if (!response.ok) {
-                    console.error('[Toggle] Server error:', response.status);
-                    return;
-                }
-
-                // Refresh the entire section to get correct sort order
-                await this.refreshSection(sectionId);
-                this.refreshStats();
+                const saved = this.queueOfflineAction(action);
+                await Promise.all([saved, this._applyOfflineToggle(itemId, sectionId, completed)]);
             } catch (error) {
-                // Intermittent signal: isOnline=true but fetch fails
-                console.error('[Toggle] Failed, falling back to offline queue:', error);
-                await this.queueOfflineAction({
-                    type: 'toggle_item',
-                    url: `/items/${itemId}/toggle`,
-                    method: 'POST'
-                });
-                await this._applyOfflineToggle(itemId, sectionId);
+                await this._applyOfflineToggle(itemId, sectionId, previous);
+                delete this._pendingCompletions[itemId];
+                this.clearPendingStyle(item);
+                window.Toast?.show(t('error.update_failed'), 'warning');
+                console.error('[Toggle] Could not persist change:', error);
+                return;
             } finally {
                 delete this._toggleInFlight[itemId];
             }
+            if (navigator.onLine) {
+                this.isOnline = true;
+                await this.fullRefresh();
+            }
         },
 
-        async _applyOfflineToggle(itemId, sectionId) {
-            const itemEl = document.getElementById(`item-${itemId}`);
-            if (!itemEl) return;
+        clearPendingStyle(item) {
+            item?.classList.remove('pending-sync', 'bg-rose-50/40', 'border-l-2', 'border-rose-400');
+            if (item) delete item.dataset.pendingSync;
+            item?.querySelector('.offline-sync-badge')?.remove();
+        },
 
+        insertItemHTML(container, html, position = 'beforeend') {
+            const id = html.match(/\bid=["'](item-\d+)["']/)?.[1];
+            if (id && document.getElementById(id)) return false;
+            container.insertAdjacentHTML(position, html.trim());
+            return true;
+        },
+
+        insertItemInOrder(container, item, sortMode = 'manual') {
+            const compare = (a, b) => {
+                let order = 0;
+                if (sortMode === 'alphabetical' || sortMode === 'alphabetical_desc') {
+                    // Match SQLite NOCASE: only ASCII letters are case folded.
+                    const key = row => Array.from((row.dataset.sortName || '').replace(/[A-Z]/g, c => c.toLowerCase()), c => c.codePointAt(0));
+                    const left = key(a), right = key(b);
+                    for (let i = 0; i < Math.min(left.length, right.length); i++) {
+                        if (left[i] !== right[i]) { order = left[i] - right[i]; break; }
+                    }
+                    if (!order) order = left.length - right.length;
+                    if (sortMode === 'alphabetical_desc') order = -order;
+                } else {
+                    order = Number(a.dataset.sortOrder || 0) - Number(b.dataset.sortOrder || 0);
+                }
+                return order || Number(a.dataset.itemId) - Number(b.dataset.itemId);
+            };
+            const next = Array.from(container.children).find(other => other !== item && other.dataset.itemId && compare(item, other) < 0);
+            container.insertBefore(item, next || null);
+        },
+
+        async _applyOfflineToggle(itemId, sectionId, desired, pending = true) {
+            const item = document.getElementById(`item-${itemId}`);
+            if (!item) return;
             const section = document.getElementById(`section-${sectionId}`);
-            const checkboxSpan = itemEl.querySelector('button > span');
-            const isCompleted = checkboxSpan && checkboxSpan.classList.contains('bg-pink-400');
-
-            // Toggle visual checkbox state
-            if (isCompleted) {
-                // Uncomplete: pink checkbox -> empty border
-                if (checkboxSpan) {
-                    checkboxSpan.classList.remove('bg-pink-400', 'flex', 'items-center', 'justify-center');
-                    checkboxSpan.classList.add('border-2', 'border-stone-300', 'hover:border-pink-400', 'hover:scale-110');
-                    checkboxSpan.innerHTML = '';
+            const checkbox = item.querySelector('button > span');
+            const before = !!checkbox?.classList.contains('bg-pink-400');
+            const completed = desired === undefined ? !before : desired;
+            item.dataset.completed = String(completed);
+            item.querySelector('button')?.setAttribute('aria-checked', String(completed));
+            if (before !== completed) {
+                if (checkbox) {
+                    checkbox.classList.toggle('bg-pink-400', completed);
+                    for (const name of ['flex', 'items-center', 'justify-center']) checkbox.classList.toggle(name, completed);
+                    for (const name of ['border-2', 'border-stone-300', 'dark:border-stone-500', 'hover:border-pink-400', 'transition-transform', 'hover:scale-110']) checkbox.classList.toggle(name, !completed);
+                    checkbox.innerHTML = completed ? '<svg class="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"></path></svg>' : '';
                 }
-                // Remove strikethrough from text
-                const textEl = itemEl.querySelector('.line-through');
-                if (textEl) {
-                    textEl.classList.remove('line-through', 'text-stone-400', 'text-stone-300');
-                    textEl.classList.add('text-stone-700');
+                const name = item.querySelector('.item-name');
+                if (name && !item.classList.contains('shopping-item')) {
+                    name.classList.toggle('line-through', completed);
+                    name.classList.toggle('text-stone-400', completed);
+                    name.classList.toggle('text-stone-700', !completed);
                 }
-                // Move to active items container
-                if (section) {
-                    const activeContainer = section.querySelector('.active-items');
-                    if (activeContainer) activeContainer.appendChild(itemEl);
+                const container = section?.querySelector(completed ? '.completed-items' : '.active-items');
+                if (container) this.insertItemInOrder(container, item, section.dataset.sortMode);
+                this.stats.completed = Math.max(0, this.stats.completed + (completed ? 1 : -1));
+                this.stats.percentage = Math.round(this.stats.completed / this.stats.total * 100) || 0;
+            }
+            if (pending) {
+                item.classList.add('pending-sync');
+                item.dataset.pendingSync = 'true';
+                const offline = !this.isOnline || !navigator.onLine;
+                for (const name of ['bg-rose-50/40', 'border-l-2', 'border-rose-400']) {
+                    item.classList.toggle(name, offline);
                 }
-                // Update stats
-                this.stats.completed = Math.max(0, this.stats.completed - 1);
             } else {
-                // Complete: empty border -> pink checkbox
-                if (checkboxSpan) {
-                    checkboxSpan.classList.remove('border-2', 'border-stone-300', 'hover:border-pink-400', 'hover:scale-110');
-                    checkboxSpan.classList.add('bg-pink-400', 'flex', 'items-center', 'justify-center');
-                    checkboxSpan.innerHTML = '<svg class="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"></path></svg>';
-                }
-                // Add strikethrough to text
-                const textEl = itemEl.querySelector('.text-stone-700');
-                if (textEl) {
-                    textEl.classList.remove('text-stone-700');
-                    textEl.classList.add('line-through', 'text-stone-400');
-                }
-                // Move to completed items container
-                if (section) {
-                    const completedContainer = section.querySelector('.completed-items');
-                    if (completedContainer) completedContainer.appendChild(itemEl);
-                }
-                // Update stats
-                this.stats.completed++;
+                this.clearPendingStyle(item);
             }
-
-            // Update stats percentage
-            this.stats.percentage = Math.round((this.stats.completed / this.stats.total) * 100) || 0;
-
-            // Add pending sync styling
-            itemEl.classList.add('pending-sync', 'bg-rose-50/40', 'border-l-2', 'border-rose-400');
-            itemEl.dataset.pendingSync = 'true';
-
-            // Add sync badge
-            if (!itemEl.querySelector('.offline-sync-badge')) {
-                const badge = document.createElement('span');
-                badge.className = 'offline-sync-badge inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-rose-100 text-rose-600 ml-2';
-                badge.innerHTML = `
-                    <svg class="w-3 h-3 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
-                    </svg>
-                    ${t('status.syncing')}
-                `;
-                const contentDiv = itemEl.querySelector('.flex-1.min-w-0');
-                if (contentDiv) contentDiv.after(badge);
-            }
-
-            // Animate checkbox
-            if (checkboxSpan) {
-                checkboxSpan.classList.add('checkbox-pulse');
-                setTimeout(() => checkboxSpan.classList.remove('checkbox-pulse'), 300);
-            }
-
-            // Update section counters
             if (section) {
                 this.updateSectionCounter(section);
                 this.updateCompletedCount(section);
                 this.updateCompletedVisibility(section);
             }
-
-            // Update IndexedDB cache
             if (this.offlineStorageReady) {
-                await window.offlineStorage.updateItemInCache(
-                    parseInt(itemId),
-                    { completed: !isCompleted }
-                );
+                // The queue is authoritative. Cache failure must not undo a durably saved tap.
+                try { await window.offlineStorage.updateItemInCache(Number(itemId), { completed }); }
+                catch (error) { console.warn('[Cache] Could not cache completion:', error); }
             }
-
-            console.log('[Toggle] Offline toggle applied:', itemId, isCompleted ? '-> active' : '-> completed');
         },
 
         async moveItemDesktop(itemId, fromSectionId, toSectionId) {
@@ -1845,7 +1836,7 @@ function shoppingList() {
                 if (!section) return;
                 const container = section.querySelector('.active-items');
                 if (container) {
-                    container.insertAdjacentHTML('beforeend', html.trim());
+                    this.insertItemHTML(container, html);
                 }
                 document.getElementById('empty-no-products')?.remove();
                 section.classList.remove('hidden');
@@ -1873,57 +1864,12 @@ function shoppingList() {
 
         // Replace an updated item in-place with fresh HTML from server
         async replaceRemoteItem(itemId) {
-            const existing = document.getElementById(`item-${itemId}`);
-            if (!existing) return;
-            try {
-                const resp = await fetch(`/items/${itemId}/html`);
-                if (!resp.ok) {
-                    const sectionId = existing.dataset.sectionId;
-                    if (sectionId) this.refreshSection(parseInt(sectionId));
-                    return;
-                }
-                const html = await resp.text();
-                existing.insertAdjacentHTML('afterend', html.trim());
-                try { Alpine.destroyTree(existing); } catch (_) {}
-                existing.remove();
-            } catch (e) {
-                console.error('[App] replaceRemoteItem failed:', e);
-                const sectionId = existing.dataset?.sectionId;
-                if (sectionId) this.refreshSection(parseInt(sectionId));
-            }
+            const sectionId = document.getElementById(`item-${itemId}`)?.dataset.sectionId;
+            if (sectionId) return this.refreshSection(sectionId);
         },
 
-        // Toggle an item on remote browser: remove from old container, fetch new HTML, insert into correct container
         async toggleRemoteItem(itemId, sectionId, isCompleted) {
-            const existing = document.getElementById(`item-${itemId}`);
-            const section = document.getElementById(`section-${sectionId}`);
-            if (!section) { this.refreshSection(sectionId); return; }
-
-            try {
-                const resp = await fetch(`/items/${itemId}/html`);
-                if (!resp.ok) { this.refreshSection(sectionId); return; }
-                const html = await resp.text();
-
-                // Remove old element
-                if (existing) {
-                    try { Alpine.destroyTree(existing); } catch (_) {}
-                    existing.remove();
-                }
-
-                // Insert into the correct container
-                const targetContainer = isCompleted
-                    ? section.querySelector('.completed-items')
-                    : section.querySelector('.active-items');
-                if (targetContainer) {
-                    targetContainer.insertAdjacentHTML('beforeend', html.trim());
-                }
-
-                this.updateSectionCounter(section);
-                this.updateCompletedVisibility(section);
-            } catch (e) {
-                console.error('[App] toggleRemoteItem failed:', e);
-                this.refreshSection(sectionId);
-            }
+            return this.refreshSection(sectionId);
         },
 
         // History management methods
@@ -2486,7 +2432,7 @@ function shoppingList() {
                                 const activeContainer = section.querySelector('.active-items');
                                 if (activeContainer) {
                                     // Alpine's mutation observer auto-initializes new elements
-                                    activeContainer.insertAdjacentHTML('beforeend', html.trim());
+                                    this.insertItemHTML(activeContainer, html);
                                 }
                                 document.getElementById('empty-no-products')?.remove();
                                 section.classList.remove('hidden');
@@ -2646,7 +2592,7 @@ function shoppingList() {
                             if (section && html) {
                                 const activeContainer = section.querySelector('.active-items');
                                 if (activeContainer) {
-                                    activeContainer.insertAdjacentHTML('beforeend', html.trim());
+                                    this.insertItemHTML(activeContainer, html);
                                 }
                                 document.getElementById('empty-no-products')?.remove();
                                 section.classList.remove('hidden');
@@ -2730,7 +2676,7 @@ function shoppingList() {
                         if (section && html) {
                             const activeContainer = section.querySelector('.active-items');
                             if (activeContainer) {
-                                activeContainer.insertAdjacentHTML('beforeend', html.trim());
+                                this.insertItemHTML(activeContainer, html);
                             }
                             document.getElementById('empty-no-products')?.remove();
                             section.classList.remove('hidden');
@@ -3240,20 +3186,8 @@ document.addEventListener('DOMContentLoaded', function() {
             const itemEl = document.getElementById(`item-${itemId}`);
             const sectionId = itemEl ? itemEl.dataset.sectionId : null;
 
-            // Reuse shared offline toggle logic
             const alpineData = Alpine.$data(document.querySelector('[x-data="shoppingList()"]'));
-            if (alpineData && sectionId) {
-                alpineData._applyOfflineToggle(itemId, sectionId);
-            }
-
-            // Queue for sync
-            window.offlineStorage.queueAction({
-                type: 'toggle_item',
-                url: path,
-                method: 'POST'
-            });
-
-            console.log('[Offline] Toggle queued:', itemId);
+            if (alpineData && sectionId) alpineData.toggleItem(itemId, sectionId);
             return false;
         }
 

@@ -172,7 +172,17 @@
 		"queued": "Išsaugota sinchronizavimui",
 		"check_connection": "Patikrinkite ryšį",
 		"not_saved_offline": "Šis sąrašas nėra išsaugotas neprisijungus.",
-		"back_to_home": "Grįžti į pagrindinį puslapį"
+		"back_to_home": "Grįžti į pagrindinį puslapį",
+		"sync_failed": "Kai kurių pakeitimų nepavyko išsaugoti. Vietiniai pakeitimai tebėra išsaugoti šiame įrenginyje.",
+		"retry": "Bandyti dar kartą",
+		"discard_change": "Atmesti nepavykusį pakeitimą",
+		"discard_confirm": "Atmesti šį nepavykusį pakeitimą? Taip pat bus pašalinti nuo jo priklausantys pakeitimai.",
+		"full_crud": "Apsipirkite ir be interneto ryšio. Pakeitimai išsaugomi šiame įrenginyje ir automatiškai sinchronizuojami atkūrus ryšį.",
+		"can_manage_lists_sections": "Kurti, redaguoti ir šalinti sąrašus bei skyrius",
+		"can_manage_products": "Pridėti, redaguoti ir šalinti produktus",
+		"can_update_products": "Keisti kiekius, pažymėti įsigytus produktus ir žymėti juos kaip neaiškius",
+		"can_organize_products": "Perkelti produktus ir keisti jų eilę",
+		"persistence_hint": "Pakeitimai lieka išsaugoti ir vėl atidarius programėlę. Importui ir istorijos tvarkymui reikalingas interneto ryšys."
 	},
 	"history": {
 		"title": "Produktų istorija",

@@ -172,7 +172,17 @@
     "queued": "Voor synchronisatie in wachtrij geplaatst",
     "check_connection": "Controleer uw verbinding",
     "not_saved_offline": "Deze lijst is niet offline opgeslagen.",
-    "back_to_home": "Terug naar startpagina"
+    "back_to_home": "Terug naar startpagina",
+    "sync_failed": "Sommige wijzigingen konden niet worden opgeslagen. Uw lokale wijzigingen blijven op dit apparaat bewaard.",
+    "retry": "Opnieuw proberen",
+    "discard_change": "Mislukte wijziging verwerpen",
+    "discard_confirm": "Deze mislukte wijziging verwerpen? Wijzigingen die hiervan afhankelijk zijn, worden ook verwijderd.",
+    "full_crud": "Blijf boodschappen doen zonder internetverbinding. Wijzigingen worden op dit apparaat opgeslagen en automatisch gesynchroniseerd zodra de verbinding is hersteld.",
+    "can_manage_lists_sections": "Lijsten en secties aanmaken, bewerken en verwijderen",
+    "can_manage_products": "Artikelen toevoegen, bewerken en verwijderen",
+    "can_update_products": "Aantallen wijzigen, artikelen afvinken en als onzeker markeren",
+    "can_organize_products": "Artikelen verplaatsen en de volgorde wijzigen",
+    "persistence_hint": "Uw wijzigingen blijven bewaard wanneer u de app opnieuw opent. Importeren en het beheren van de geschiedenis vereisen een internetverbinding."
   },
   "history": {
     "title": "Aankoopgeschiedenis",

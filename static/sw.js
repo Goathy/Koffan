@@ -4,6 +4,7 @@
 const CACHE_VERSION = 'koffan-__CACHE_VERSION__';
 const STATIC_CACHE = CACHE_VERSION + '-static';
 const DYNAMIC_CACHE = CACHE_VERSION + '-dynamic';
+const NAVIGATION_TIMEOUT_MS = 5000;
 
 // Pattern for list pages
 const LIST_PAGE_PATTERN = /^\/lists\/\d+$/;
@@ -11,7 +12,12 @@ const LIST_PAGE_PATTERN = /^\/lists\/\d+$/;
 // Static assets to cache on install
 const STATIC_ASSETS = [
     '/static/app.js?v=__ASSET_HASH__',
+    '/static/realtime.js?v=__ASSET_HASH__',
+    '/static/viewport.js?v=__ASSET_HASH__',
     '/static/offline-storage.js?v=__ASSET_HASH__',
+    '/static/offline-crud.js?v=__ASSET_HASH__',
+    '/static/offline-view.js?v=__ASSET_HASH__',
+    '/static/offline-app.js?v=__ASSET_HASH__',
     '/static/ui-scale.js?v=__ASSET_HASH__',
     '/static/manifest.json',
     '/static/koffan-logo.webp',
@@ -44,14 +50,14 @@ self.addEventListener('install', (event) => {
             // Without this, launching offline hits the networkFirst fallback because
             // "/" is otherwise only cached lazily after a successful online load.
             caches.open(DYNAMIC_CACHE)
-                .then(cache => fetch('/', { credentials: 'same-origin' })
+                .then(cache => Promise.all(['/', '/offline/list'].map(path => fetch(path, { credentials: 'same-origin' })
                     .then(response => {
                         // Skip login redirects and errors so we never cache a non-shell page.
                         if (response.ok && !response.redirected) {
-                            return cache.put('/', response);
+                            return cache.put(path, response);
                         }
                     })
-                    .catch(err => console.warn('[SW] App shell precache failed:', err)))
+                    .catch(err => console.warn('[SW] App shell precache failed:', err)))))
         ]).then(() => self.skipWaiting())
     );
 });
@@ -86,53 +92,29 @@ self.addEventListener('fetch', (event) => {
 
     const url = new URL(event.request.url);
 
-    // Skip WebSocket connections
-    if (url.pathname === '/ws') {
+    // Requests outside this application must retain their own caching behavior.
+    if (url.origin !== self.location.origin || event.request.method !== 'GET') {
         return;
     }
 
-    // Skip non-GET requests (let them go through, app.js handles offline queueing)
-    if (event.request.method !== 'GET') {
-        return;
-    }
-
-    // Skip API data endpoint - always fetch fresh when online
-    if (url.pathname === '/api/data') {
-        event.respondWith(networkFirst(event.request));
-        return;
-    }
-
-    // Static assets - Cache First
     if (url.pathname.startsWith('/static/')) {
         event.respondWith(cacheFirst(event.request));
         return;
     }
 
-    // List pages (/lists/:id) - Network First with special offline handling
-    if (LIST_PAGE_PATTERN.test(url.pathname)) {
-        event.respondWith(listPageStrategy(event.request));
-        return;
-    }
-
-    // HTML pages (/, /login, /lists) - Network First with cache fallback
-    if (event.request.headers.get('accept')?.includes('text/html')) {
+    // Only full documents may fall back to stale content. Cached API responses
+    // and HTMX fragments look like successful server replies and can undo local
+    // changes or hide a disconnected mobile connection from the application.
+    if (event.request.mode === 'navigate') {
         event.respondWith(networkFirst(event.request));
-        return;
     }
 
-    // Stats and other API - Network First
-    if (url.pathname === '/stats' || url.pathname.startsWith('/sections/') || url.pathname.startsWith('/items/')) {
-        event.respondWith(networkFirst(event.request));
-        return;
-    }
-
-    // Default - Network First
-    event.respondWith(networkFirst(event.request));
 });
 
 // Cache First strategy - for static assets
 async function cacheFirst(request) {
-    const cached = await caches.match(request);
+    const staticCache = await caches.open(STATIC_CACHE);
+    const cached = await staticCache.match(request);
     if (cached) {
         return cached;
     }
@@ -140,8 +122,11 @@ async function cacheFirst(request) {
     try {
         const response = await fetch(request);
         if (response.ok) {
-            const cache = await caches.open(STATIC_CACHE);
-            cache.put(request, response.clone());
+            try {
+                await staticCache.put(request, response.clone());
+            } catch (error) {
+                console.warn('[SW] Static asset could not be cached:', error);
+            }
         }
         return response;
     } catch (error) {
@@ -156,59 +141,59 @@ async function cacheFirst(request) {
     }
 }
 
-// Network First strategy - for dynamic content
-async function networkFirst(request) {
+// Bound document loads when a mobile connection remains up but cannot reach
+// the server. Fetch may otherwise hang for minutes before showing the cache.
+async function fetchNavigation(request) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), NAVIGATION_TIMEOUT_MS);
     try {
-        const response = await fetch(request);
-        // Skip redirected responses (e.g. an expired session bouncing to /login) so we
-        // never cache a login page under the requested URL and poison the offline shell.
-        if (response.ok && !response.redirected) {
-            const cache = await caches.open(DYNAMIC_CACHE);
-            cache.put(request, response.clone());
-        }
+        const response = await fetch(request, { signal: controller.signal });
+        // Headers can arrive before a mobile connection stalls. Buffer a clone
+        // while the timeout remains active, preserving the original redirect and
+        // URL metadata for cache safety and the browser's navigation handling.
+        await response.clone().arrayBuffer();
         return response;
-    } catch (error) {
-        const cached = await caches.match(request);
-        if (cached) {
-            return cached;
-        }
-
-        // Return offline fallback for HTML
-        if (request.headers.get('accept')?.includes('text/html')) {
-            // Try to return cached main page
-            const mainPage = await caches.match('/');
-            if (mainPage) {
-                return mainPage;
-            }
-            return new Response('<html><body style="font-family:system-ui;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#fafaf9"><div style="text-align:center"><h1 style="color:#78716c">Koffan Offline</h1><p style="color:#a8a29e">Check your connection</p></div></body></html>', {
-                headers: { 'Content-Type': 'text/html' }
-            });
-        }
-
-        throw error;
+    } finally {
+        clearTimeout(timer);
     }
 }
 
-// List Page strategy - Network First with list-specific fallback
-async function listPageStrategy(request) {
+async function cacheDocument(request, response) {
+    if (!response.ok || response.redirected) return;
     try {
-        const response = await fetch(request);
-        // Skip redirected responses (e.g. an expired session bouncing to /login) so we
-        // never cache a login page under the list URL.
-        if (response.ok && !response.redirected) {
-            const cache = await caches.open(DYNAMIC_CACHE);
-            cache.put(request, response.clone());
-        }
+        const cache = await caches.open(DYNAMIC_CACHE);
+        await cache.put(request, response.clone());
+    } catch (error) {
+        // Cache quota or storage failures must not turn a successful load offline.
+        console.warn('[SW] Document could not be cached:', error);
+    }
+}
+
+// Network First strategy for complete documents only.
+async function networkFirst(request) {
+    try {
+        const response = await fetchNavigation(request);
+        await cacheDocument(request, response);
         return response;
     } catch (error) {
-        // Try to return cached version of this list
-        const cached = await caches.match(request);
-        if (cached) {
-            return cached;
-        }
+        const cache = await caches.open(DYNAMIC_CACHE);
+        const cached = await cache.match(request);
+        if (cached) return cached;
 
-        // List not cached - show offline message
-        return new Response('<html><body style="font-family:system-ui;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#fafaf9"><div style="text-align:center"><h1 style="color:#78716c">Koffan Offline</h1><p style="color:#a8a29e">This list is not saved offline.</p><a href="/" style="color:#f472b6;text-decoration:none">Back to home page</a></div></body></html>', {
+        const isList = LIST_PAGE_PATTERN.test(new URL(request.url).pathname);
+        if (isList || new URL(request.url).pathname === '/offline/list') {
+            // The shell renders only the requested list from the durable model.
+            // This also supports lists created on this device while offline.
+            const shell = await cache.match('/offline/list');
+            if (shell) return shell;
+        }
+        if (!isList) {
+            const mainPage = await cache.match('/');
+            if (mainPage) return mainPage;
+        }
+        const message = isList ? 'This list is not saved offline.' : 'Check your connection';
+        return new Response(`<html><body style="font-family:system-ui;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#fafaf9"><div style="text-align:center"><h1 style="color:#78716c">Koffan Offline</h1><p style="color:#a8a29e">${message}</p><a href="/" style="color:#f472b6;text-decoration:none">Back to home page</a></div></body></html>`, {
+            status: 503,
             headers: { 'Content-Type': 'text/html' }
         });
     }
@@ -223,7 +208,7 @@ self.addEventListener('message', (event) => {
     if (event.data && event.data.type === 'CLEAR_CACHE') {
         event.waitUntil(
             caches.keys().then(keys => {
-                return Promise.all(keys.map(key => caches.delete(key)));
+                return Promise.all(keys.filter(key => key.startsWith('koffan-')).map(key => caches.delete(key)));
             })
         );
     }

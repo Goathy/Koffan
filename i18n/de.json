@@ -172,7 +172,17 @@
     "queued": "Zur Synchronisierung gespeichert",
     "check_connection": "Überprüfe deine Verbindung",
     "not_saved_offline": "Diese Liste ist nicht offline gespeichert.",
-    "back_to_home": "Zurück zur Startseite"
+    "back_to_home": "Zurück zur Startseite",
+    "sync_failed": "Einige Änderungen konnten nicht gespeichert werden. Deine lokalen Änderungen bleiben auf diesem Gerät gespeichert.",
+    "retry": "Erneut versuchen",
+    "discard_change": "Fehlgeschlagene Änderung verwerfen",
+    "discard_confirm": "Diese fehlgeschlagene Änderung verwerfen? Davon abhängige Änderungen werden ebenfalls entfernt.",
+    "full_crud": "Kaufe auch ohne Internetverbindung weiter ein. Änderungen werden auf diesem Gerät gespeichert und automatisch synchronisiert, sobald die Verbindung wiederhergestellt ist.",
+    "can_manage_lists_sections": "Listen und Abschnitte erstellen, bearbeiten und löschen",
+    "can_manage_products": "Produkte hinzufügen, bearbeiten und löschen",
+    "can_update_products": "Mengen ändern, Produkte abhaken und als unsicher markieren",
+    "can_organize_products": "Produkte verschieben und ihre Reihenfolge ändern",
+    "persistence_hint": "Deine Änderungen bleiben beim erneuten Öffnen der App gespeichert. Import und Verlaufsverwaltung erfordern eine Internetverbindung."
   },
   "history": {
     "title": "Produktverlauf",

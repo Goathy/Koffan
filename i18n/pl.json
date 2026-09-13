@@ -172,7 +172,17 @@
     "queued": "Zapisano do synchronizacji",
     "check_connection": "Sprawdź połączenie",
     "not_saved_offline": "Ta lista nie jest zapisana offline.",
-    "back_to_home": "Wróć do strony głównej"
+    "back_to_home": "Wróć do strony głównej",
+    "sync_failed": "Nie udało się zapisać części zmian. Twoje lokalne zmiany nadal są zapisane na tym urządzeniu.",
+    "retry": "Spróbuj ponownie",
+    "discard_change": "Odrzuć błędną zmianę",
+    "discard_confirm": "Odrzucić tę zmianę? Zmiany, które od niej zależą, również zostaną usunięte.",
+    "full_crud": "Rób zakupy bez internetu. Zmiany zapisują się na tym urządzeniu i synchronizują automatycznie po odzyskaniu połączenia.",
+    "can_manage_lists_sections": "Tworzenie, edycja i usuwanie list oraz sekcji",
+    "can_manage_products": "Dodawanie, edycja i usuwanie produktów",
+    "can_update_products": "Zmiana ilości, zaznaczanie i oznaczanie jako niepewne",
+    "can_organize_products": "Przenoszenie produktów i zmiana kolejności",
+    "persistence_hint": "Zmiany zostają po ponownym otwarciu aplikacji. Import i zarządzanie historią wymagają internetu."
   },
   "history": {
     "title": "Historia produktów",

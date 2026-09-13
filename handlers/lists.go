@@ -30,13 +30,18 @@ func GetListsPage(c *fiber.Ctx) error {
 	}
 
 	templates, _ := db.GetAllTemplates()
+	snapshot, err := db.GetOfflineSnapshot()
+	if err != nil {
+		return sendError(c, 500, "error.fetch_failed")
+	}
 
 	return c.Render("home", fiber.Map{
-		"Lists":        lists,
-		"Templates":    templates,
-		"Translations": i18n.GetAllLocales(),
-		"Locales":      i18n.AvailableLocales(),
-		"DefaultLang":  i18n.GetDefaultLang(),
+		"Lists":           lists,
+		"Templates":       templates,
+		"OfflineSnapshot": snapshot,
+		"Translations":    i18n.GetAllLocales(),
+		"Locales":         i18n.AvailableLocales(),
+		"DefaultLang":     i18n.GetDefaultLang(),
 	})
 }
 
@@ -68,16 +73,21 @@ func GetListView(c *fiber.Ctx) error {
 
 	stats := db.GetListStats(id)
 	lists, _ := db.GetAllLists()
+	snapshot, err := db.GetOfflineSnapshot()
+	if err != nil {
+		return sendError(c, 500, "error.fetch_failed")
+	}
 
 	return c.Render("list", fiber.Map{
-		"List":          list,
-		"Lists":         lists,
-		"Sections":      sections,
-		"Stats":         stats,
-		"ShowCompleted": list.ShowCompleted,
-		"Translations":  i18n.GetAllLocales(),
-		"Locales":       i18n.AvailableLocales(),
-		"DefaultLang":   i18n.GetDefaultLang(),
+		"List":            list,
+		"OfflineSnapshot": snapshot,
+		"Lists":           lists,
+		"Sections":        sections,
+		"Stats":           stats,
+		"ShowCompleted":   list.ShowCompleted,
+		"Translations":    i18n.GetAllLocales(),
+		"Locales":         i18n.AvailableLocales(),
+		"DefaultLang":     i18n.GetDefaultLang(),
 	})
 }
 

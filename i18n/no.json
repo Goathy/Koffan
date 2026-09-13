@@ -172,7 +172,17 @@
     "queued": "Lagret for synkronisering",
     "check_connection": "Sjekk tilkoblingen din",
     "not_saved_offline": "Denne listen er ikke lagret frakoblet.",
-    "back_to_home": "Tilbake til forsiden"
+    "back_to_home": "Tilbake til forsiden",
+    "sync_failed": "Noen endringer kunne ikke lagres. De lokale endringene dine er fortsatt lagret på denne enheten.",
+    "retry": "Prøv igjen",
+    "discard_change": "Forkast mislykket endring",
+    "discard_confirm": "Forkaste denne mislykkede endringen? Endringer som er avhengige av den, blir også fjernet.",
+    "full_crud": "Fortsett å handle uten internettforbindelse. Endringer lagres på denne enheten og synkroniseres automatisk når tilkoblingen er tilbake.",
+    "can_manage_lists_sections": "Opprette, redigere og slette lister og seksjoner",
+    "can_manage_products": "Legge til, redigere og slette produkter",
+    "can_update_products": "Endre antall, krysse av produkter og markere dem som usikre",
+    "can_organize_products": "Flytte produkter og endre rekkefølgen",
+    "persistence_hint": "Endringene dine forblir lagret når du åpner appen igjen. Import og administrasjon av historikk krever internettforbindelse."
   },
   "history": {
     "title": "Produkthistorikk",

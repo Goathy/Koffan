@@ -172,7 +172,17 @@
     "queued": "Guardado para sincronização",
     "check_connection": "Verifique a sua conexão",
     "not_saved_offline": "Esta lista não está guardada offline.",
-    "back_to_home": "Voltar à página principal"
+    "back_to_home": "Voltar à página principal",
+    "sync_failed": "Não foi possível salvar algumas alterações. Suas alterações locais continuam salvas neste dispositivo.",
+    "retry": "Tentar novamente",
+    "discard_change": "Descartar alteração com falha",
+    "discard_confirm": "Descartar esta alteração com falha? As alterações que dependem dela também serão removidas.",
+    "full_crud": "Continue fazendo compras sem conexão com a internet. As alterações são salvas neste dispositivo e sincronizadas automaticamente quando a conexão é restabelecida.",
+    "can_manage_lists_sections": "Criar, editar e excluir listas e seções",
+    "can_manage_products": "Adicionar, editar e excluir produtos",
+    "can_update_products": "Alterar quantidades, marcar produtos comprados e marcá-los como incertos",
+    "can_organize_products": "Mover produtos e alterar sua ordem",
+    "persistence_hint": "Suas alterações continuam salvas quando você reabre o aplicativo. As importações e o gerenciamento do histórico exigem conexão com a internet."
   },
   "history": {
     "title": "Histórico de produtos",

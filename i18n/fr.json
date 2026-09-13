@@ -172,7 +172,17 @@
     "queued": "Enregistré pour synchronisation",
     "check_connection": "Vérifiez votre connexion",
     "not_saved_offline": "Cette liste n'est pas enregistrée hors ligne.",
-    "back_to_home": "Retour à l'accueil"
+    "back_to_home": "Retour à l'accueil",
+    "sync_failed": "Certaines modifications n’ont pas pu être enregistrées. Vos modifications locales restent enregistrées sur cet appareil.",
+    "retry": "Réessayer",
+    "discard_change": "Abandonner la modification en échec",
+    "discard_confirm": "Abandonner cette modification en échec ? Les modifications qui en dépendent seront également supprimées.",
+    "full_crud": "Continuez vos courses sans connexion internet. Les modifications sont enregistrées sur cet appareil et se synchronisent automatiquement au retour de la connexion.",
+    "can_manage_lists_sections": "Créer, modifier et supprimer des listes et des sections",
+    "can_manage_products": "Ajouter, modifier et supprimer des produits",
+    "can_update_products": "Modifier les quantités, cocher les produits achetés et les marquer comme incertains",
+    "can_organize_products": "Déplacer les produits et modifier leur ordre",
+    "persistence_hint": "Vos modifications restent enregistrées lorsque vous rouvrez l’application. Les importations et la gestion de l’historique nécessitent une connexion internet."
   },
   "history": {
     "title": "Historique des produits",

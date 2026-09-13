@@ -1,5 +1,11 @@
 {{define "home"}}
-<div x-data="homePage()" x-init="init()" class="min-h-screen bg-stone-50 dark:bg-stone-900">
+<div x-data="homePage()" x-init="init()" x-show="_crudReady" x-cloak class="min-h-screen bg-stone-50 dark:bg-stone-900">
+    <div x-show="crudError" x-cloak role="alert" class="mx-auto max-w-4xl p-3 text-sm bg-amber-50 dark:bg-amber-950 text-amber-900 dark:text-amber-100">
+        <span x-text="crudError"></span>
+        <button @click="crudRetry()" class="underline ml-2" x-text="t('offline.retry')"></button>
+        <button x-show="_crudConflict" @click="crudDiscardConflict()" class="underline ml-2" x-text="t('offline.discard_change')"></button>
+    </div>
+
     <!-- Header -->
     <header class="sticky top-0 z-30 bg-stone-50 dark:bg-stone-900 pt-3">
         <div class="container mx-auto max-w-4xl px-4">
@@ -146,8 +152,10 @@
         </div>
 
         {{else}}
+        <div id="lists-container" class="flex flex-wrap gap-3 mb-6"></div>
         <!-- No lists - Onboarding -->
-        <div class="flex flex-col items-center justify-center min-h-[60vh] text-center px-4">
+        <button x-show="crudHasLists" @click="showNewListModal = true" class="w-full p-4 border border-dashed border-stone-300 dark:border-stone-700 rounded-xl text-stone-500" x-text="t('lists.new_list')"></button>
+        <div x-show="!crudHasLists" class="flex flex-col items-center justify-center min-h-[60vh] text-center px-4">
             <!-- Illustration -->
             <div class="w-32 h-32 mb-8 bg-gradient-to-br from-pink-100 to-pink-50 dark:from-pink-900/50 dark:to-pink-900/30 rounded-3xl flex items-center justify-center">
                 <svg class="w-16 h-16 text-pink-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
