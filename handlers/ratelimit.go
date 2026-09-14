@@ -42,6 +42,12 @@ func InitLoginRateLimiter() {
 		LockoutDuration: time.Duration(getEnvInt("LOGIN_LOCKOUT_MINUTES", 30)) * time.Minute,
 	}
 
+	if config.MaxAttempts == 0 {
+		loginLimiter = nil
+		log.Print("[RATE LIMIT] Disabled: LOGIN_MAX_ATTEMPTS=0")
+		return
+	}
+
 	loginLimiter = &LoginRateLimiter{
 		config:   config,
 		attempts: make(map[string]*LoginAttempt),

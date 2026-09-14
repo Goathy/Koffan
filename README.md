@@ -172,13 +172,17 @@ docker-compose up -d
 | `HTTP_READ_BUFFER_SIZE` | `16384` | Max size in bytes for request headers (raise if you see HTTP 431 behind an SSO proxy) |
 | `DB_PATH` | `./shopping.db` | Database file path |
 | `DEFAULT_LANG` | `en` | Default UI language ([supported codes](i18n/README.md#supported-languages)) |
-| `LOGIN_MAX_ATTEMPTS` | `5` | Max login attempts before lockout |
+| `LOGIN_MAX_ATTEMPTS` | `5` | Max failed login attempts before lockout; set to `0` to disable login rate limiting |
 | `LOGIN_WINDOW_MINUTES` | `15` | Time window for counting attempts |
 | `LOGIN_LOCKOUT_MINUTES` | `30` | Lockout duration after exceeding limit |
 | `API_TOKEN` | *(disabled)* | Enable REST API with this token ([docs](https://github.com/PanSalut/Koffan/wiki/REST-API)) |
 | `WEBHOOK_URL` | *(disabled)* | HTTP or HTTPS endpoint for outbound item events |
 | `WEBHOOK_SECRET` | *(none)* | Secret used to sign webhook payloads with HMAC-SHA256 |
 | `WEBHOOK_EVENTS` | *(all item events)* | Comma-separated filter: `item.created`, `item.updated`, `item.completed`, `item.deleted` |
+
+### Login Rate Limiting
+
+If your reverse proxy already handles rate limiting (for example, Traefik with CrowdSec), set `LOGIN_MAX_ATTEMPTS=0` in the container environment and restart Koffan. This disables the built-in login limiter while keeping password authentication enabled. `LOGIN_WINDOW_MINUTES` and `LOGIN_LOCKOUT_MINUTES` have no effect when the limiter is disabled.
 
 ### Outbound Webhooks
 
